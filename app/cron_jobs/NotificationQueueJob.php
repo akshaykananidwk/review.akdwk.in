@@ -15,12 +15,26 @@ final class NotificationQueueJob
     private const BATCH_SIZE = 50;
     private const RETRY_BACKOFF_MINUTES = 5;
 
+    private const STUCK_PROCESSING_MINUTES = 10;
+
     public function run(PDO $pdo, CronLogger $log): string
     {
         $wa = new WhatsAppService($pdo);
         $sent = 0;
         $failed = 0;
         $exhausted = 0;
+
+        // Recover rows stuck in 'processing' by a crashed run so they are
+        // retried instead of being lost forever.
+        $recovered = $pdo->exec("
+            UPDATE notification_queue
+            SET status = 'pending', updated_at = NOW()
+            WHERE status = 'processing'
+              AND updated_at < DATE_SUB(NOW(), INTERVAL " . self::STUCK_PROCESSING_MINUTES . " MINUTE)
+        ");
+        if ((int)$recovered > 0) {
+            $log->line('recovered ' . (int)$recovered . ' message(s) stuck in processing');
+        }
 
         $select = $pdo->prepare("
             SELECT id FROM notification_queue

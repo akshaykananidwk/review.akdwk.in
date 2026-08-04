@@ -22,6 +22,11 @@ try {
 
     if ($service->cronTablesExist()) {
         $service->syncRegistry();
+        $job = $service->getJob('daily_review_summary');
+        if ((int)$job['is_enabled'] !== 1) {
+            echo "daily_review_summary: skipped — job is disabled in Admin → Cron Settings\n";
+            exit(0);
+        }
         $run = $service->runJob('daily_review_summary', 'manual');
         echo 'daily_review_summary: ' . $run['status']
             . ($run['summary'] !== '' ? ' — ' . $run['summary'] : '') . "\n";

@@ -36,6 +36,11 @@ if (!$forceReset && $forceClientId === 0) {
     $cron = new CronService($pdo);
     if ($cron->cronTablesExist()) {
         $cron->syncRegistry();
+        $cronJob = $cron->getJob('refill_buffer');
+        if ((int)$cronJob['is_enabled'] !== 1) {
+            echo "refill_buffer: skipped — job is disabled in Admin → Cron Settings\n";
+            exit(0);
+        }
         $run = $cron->runJob('refill_buffer', 'manual');
         $line = 'refill_buffer: ' . $run['status'] . ($run['summary'] !== '' ? ' — ' . $run['summary'] : '');
         echo $line . "\n";
