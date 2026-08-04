@@ -299,11 +299,15 @@ $statusBadge = static function (string $status): string {
     renderSteps(stepIdx, -1);
     return api({action: 'run_step', update_id: updateId, step: STEPS[stepIdx][0]}).then(function (res) {
       if (!res.ok) {
-        // Pull the final state (rollback log) before failing.
+        // Pull the final state (status + rollback log) before failing.
         return api({action: 'get_update', update_id: updateId}).then(function (st) {
-          if (st.ok) applyUpdateState(st.update);
+          var err = new Error(res.error || 'Update step failed');
+          if (st.ok) {
+            applyUpdateState(st.update);
+            err.updateStatus = st.update.status;
+          }
           renderSteps(stepIdx, stepIdx);
-          throw new Error(res.error || 'Update step failed');
+          throw err;
         });
       }
       applyUpdateState(res.update);
@@ -338,7 +342,9 @@ $statusBadge = static function (string $status): string {
       title.style.color = '#065f46';
       setTimeout(function () { window.location.reload(); }, 2500);
     }).catch(function (e) {
-      title.textContent = '✖ Update failed — automatic rollback was performed.';
+      title.textContent = e.updateStatus === 'rolled_back'
+        ? '✖ Update failed — automatic rollback restored the previous version.'
+        : '✖ Update stopped before deploy — nothing on the site was changed.';
       title.style.color = '#991b1b';
       logBox.textContent += '\n[ERROR] ' + e.message;
       logBox.scrollTop = logBox.scrollHeight;
