@@ -1,0 +1,9 @@
+Options -Indexes
+
+<FilesMatch "^(config\.php|database\.php|\.env)$">
+  Require all denied
+</FilesMatch>
+
+# Prevent script execution in uploads QR folder (Apache)
+RewriteEngine On
+RewriteRule ^uploads/qr/.*\.(php|php5|phtml|phar)$ - [F,L,NC]

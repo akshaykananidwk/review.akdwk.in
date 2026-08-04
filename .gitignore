@@ -1,0 +1,44 @@
+# Environment / secrets — never commit real credentials
+.env
+
+# User data — never tracked, never overwritten by updates
+public/uploads/*
+!public/uploads/.htaccess
+!public/uploads/qr/
+public/uploads/qr/*
+!public/uploads/qr/.htaccess
+!public/uploads/qr/.gitkeep
+!public/uploads/standee/
+public/uploads/standee/*
+!public/uploads/standee/.gitkeep
+!public/uploads/standee/generated/
+public/uploads/standee/generated/*
+!public/uploads/standee/generated/.gitkeep
+!public/uploads/standee_templates/
+public/uploads/standee_templates/*
+!public/uploads/standee_templates/.gitkeep
+!public/uploads/sliders/
+public/uploads/sliders/*
+!public/uploads/sliders/.gitkeep
+
+# Runtime storage (logs, backups, cache, update staging)
+storage/logs/*
+!storage/logs/.gitkeep
+storage/backups/*
+!storage/backups/.gitkeep
+storage/cache/*
+!storage/cache/.gitkeep
+storage/updates/*
+!storage/updates/.gitkeep
+storage/.update_lock
+
+# ACME / certbot challenges
+public/.well-known/
+
+# Generated samples
+tools/standee_samples/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
