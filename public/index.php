@@ -102,14 +102,116 @@ $videoEmbed = landing_embed_url($heroVideoUrl);
 $videoIsMp4 = (bool)preg_match('#\.mp4($|\?)#i', $heroVideoUrl);
 
 $helplineTel = preg_replace('/[^0-9+]/', '', $helplineNumber) ?? '';
+
+// ---------------------------------------------------------------------------
+// SEO (all overridable from Global Settings; strong keyword-rich defaults).
+// ---------------------------------------------------------------------------
+$seoTitle = getSystemSetting(
+    $pdo,
+    'seo_title',
+    $systemName . ' — Google Review QR Code Stand & AI Review Software for Local Business India'
+);
+$seoDescription = getSystemSetting(
+    $pdo,
+    'seo_description',
+    'Get more 5-star Google reviews automatically with a smart QR code standee, AI review generator, '
+    . 'star-rating gating and daily WhatsApp reports. Free trial for local businesses — '
+    . 'special FREE plan for Devbhumi Dwarka (Gujarat) shops, hotels and services.'
+);
+$seoKeywords = getSystemSetting(
+    $pdo,
+    'seo_keywords',
+    'google review qr code, google review stand, google review software india, increase google reviews, '
+    . 'review qr code standee, ai review generator, google review system gujarat, google review dwarka, '
+    . 'review management software, 5 star review qr code, whatsapp review report, review qr stand price'
+);
+$offerEnabled = (int)getSystemSetting($pdo, 'landing_offer_enabled', '1') === 1;
+$offerText = getSystemSetting(
+    $pdo,
+    'landing_offer_text',
+    '🎉 ખાસ ઓફર: દેવભૂમિ દ્વારકા જિલ્લાના તમામ વેપારીઓ માટે 3 વર્ષ સુધી બિલકુલ FREE — બાકી બધા માટે 3 મહિના ફ્રી ટ્રાયલ!'
+);
+
+// FAQ (visible section + FAQPage schema) — editable via `landing_faqs` JSON.
+$faqsRaw = getSystemSetting($pdo, 'landing_faqs', '');
+$faqs = json_decode($faqsRaw, true);
+if (!is_array($faqs) || $faqs === []) {
+    $faqs = [
+        ['q' => 'What is a Google review QR code stand?', 'a' => 'It is a printed standee with a unique QR code for your business. Customers scan it, tap a star rating, and 4–5 star customers are guided straight to your Google review page — so your Google profile grows automatically.'],
+        ['q' => 'How does the AI review generator work?', 'a' => 'The system keeps a ready buffer of natural, category-aware review texts for your business. A happy customer just taps once — no typing needed — and posts the review on Google in seconds.'],
+        ['q' => 'What happens when a customer gives 1–3 stars?', 'a' => 'Low ratings are captured privately as internal feedback and never pushed to Google. You see the feedback in your dashboard and can fix the issue — your public rating only goes up.'],
+        ['q' => 'Is it free for businesses in Devbhumi Dwarka?', 'a' => 'Yes! All businesses in Devbhumi Dwarka district (Dwarka, Khambhalia, Bhanvad, Okha, Salaya area) get the platform completely FREE for up to 3 years. Businesses elsewhere get a free trial of at least 3 months.'],
+        ['q' => 'Do I need any technical knowledge?', 'a' => 'No. Register your business, download your print-ready QR standee, and place it on your counter. Everything else — review flow, WhatsApp reports, analytics — runs automatically.'],
+        ['q' => 'How much does it cost after the free period?', 'a' => 'Simple wallet-based recharges like a mobile plan — pay only for the reviews you collect. No monthly contract, no hidden fees, cancel anytime.'],
+    ];
+}
+
+$canonicalUrl = APP_URL . '/';
+$ogImage = $globalLogoPath !== '' ? APP_URL . '/' . $globalLogoPath : '';
+
+$jsonLd = [
+    [
+        '@context' => 'https://schema.org',
+        '@type' => 'SoftwareApplication',
+        'name' => $systemName,
+        'applicationCategory' => 'BusinessApplication',
+        'operatingSystem' => 'Web',
+        'url' => $canonicalUrl,
+        'description' => $seoDescription,
+        'offers' => ['@type' => 'Offer', 'price' => '0', 'priceCurrency' => 'INR', 'description' => 'Free trial — special free plan for Devbhumi Dwarka businesses'],
+    ],
+    [
+        '@context' => 'https://schema.org',
+        '@type' => 'Organization',
+        'name' => $systemName,
+        'url' => $canonicalUrl,
+        'logo' => $ogImage !== '' ? $ogImage : $canonicalUrl,
+        'areaServed' => ['Devbhumi Dwarka', 'Gujarat', 'India'],
+        'contactPoint' => array_filter([
+            '@type' => 'ContactPoint',
+            'contactType' => 'customer support',
+            'telephone' => $helplineTel !== '' ? $helplineTel : null,
+            'availableLanguage' => ['Gujarati', 'Hindi', 'English'],
+        ]),
+    ],
+    [
+        '@context' => 'https://schema.org',
+        '@type' => 'FAQPage',
+        'mainEntity' => array_map(static fn(array $f): array => [
+            '@type' => 'Question',
+            'name' => (string)($f['q'] ?? ''),
+            'acceptedAnswer' => ['@type' => 'Answer', 'text' => (string)($f['a'] ?? '')],
+        ], $faqs),
+    ],
+];
 ?>
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title><?= htmlspecialchars($systemName) ?> — AI-Powered Google Review System for Local Businesses</title>
-  <meta name="description" content="<?= htmlspecialchars($heroSubheadline) ?>">
+  <title><?= htmlspecialchars($seoTitle) ?></title>
+  <meta name="description" content="<?= htmlspecialchars($seoDescription) ?>">
+  <meta name="keywords" content="<?= htmlspecialchars($seoKeywords) ?>">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="<?= htmlspecialchars($canonicalUrl) ?>">
+  <meta name="theme-color" content="#005f8f">
+  <meta name="geo.region" content="IN-GJ">
+  <meta name="geo.placename" content="Devbhumi Dwarka, Gujarat, India">
+  <!-- Open Graph / social sharing -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="<?= htmlspecialchars($systemName) ?>">
+  <meta property="og:title" content="<?= htmlspecialchars($seoTitle) ?>">
+  <meta property="og:description" content="<?= htmlspecialchars($seoDescription) ?>">
+  <meta property="og:url" content="<?= htmlspecialchars($canonicalUrl) ?>">
+  <meta property="og:locale" content="en_IN">
+  <meta property="og:locale:alternate" content="gu_IN">
+  <?php if ($ogImage !== ''): ?><meta property="og:image" content="<?= htmlspecialchars($ogImage) ?>"><?php endif; ?>
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="<?= htmlspecialchars($seoTitle) ?>">
+  <meta name="twitter:description" content="<?= htmlspecialchars($seoDescription) ?>">
+  <?php if ($ogImage !== ''): ?><meta name="twitter:image" content="<?= htmlspecialchars($ogImage) ?>"><?php endif; ?>
+  <script type="application/ld+json"><?= json_encode($jsonLd, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -227,6 +329,19 @@ $helplineTel = preg_replace('/[^0-9+]/', '', $helplineNumber) ?? '';
     .cta-band h2{margin:0 0 10px;font-size:clamp(1.5rem,2.4vw,2.1rem);font-weight:800}
     .cta-band p{margin:0 0 22px;color:#cbd5e1;max-width:520px;margin-left:auto;margin-right:auto}
 
+    /* Offer strip */
+    .offer-strip{background:linear-gradient(90deg,#b45309,#d97706,#b45309);color:#fff;text-align:center;padding:10px 16px;font-weight:700;font-size:.95rem}
+    .offer-strip a{color:#fff;text-decoration:underline;margin-left:8px}
+
+    /* FAQ */
+    .faq-list{max-width:820px;margin:0 auto}
+    .faq-item{background:#fff;border:1px solid #e2e8f0;border-radius:14px;margin-bottom:12px;overflow:hidden}
+    .faq-item summary{cursor:pointer;padding:16px 20px;font-weight:700;color:var(--ink);list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .faq-item summary::-webkit-details-marker{display:none}
+    .faq-item summary::after{content:"+";color:var(--peacock);font-size:1.3rem;font-weight:800;flex:0 0 auto}
+    .faq-item[open] summary::after{content:"−"}
+    .faq-item .faq-a{padding:0 20px 16px;color:var(--muted);font-size:.95rem;line-height:1.6}
+
     /* Footer */
     footer{background:#0f172a;color:#cbd5e1;padding:40px 0 20px;margin-top:50px}
     footer .row{display:grid;gap:24px;grid-template-columns:1fr;margin-bottom:24px}
@@ -254,11 +369,20 @@ $helplineTel = preg_replace('/[^0-9+]/', '', $helplineNumber) ?? '';
       <a href="#features">Features</a>
       <a href="#how">How It Works</a>
       <?php if ($showPricing && !empty($plans)): ?><a href="#pricing">Pricing</a><?php endif; ?>
+      <a href="#faq">FAQ</a>
       <a href="<?= APP_URL ?>/login.php" class="btn btn-ghost">Login</a>
       <a href="<?= APP_URL ?>/register.php" class="btn btn-primary">Register Business</a>
     </nav>
   </div>
 </header>
+
+<?php if ($offerEnabled && trim($offerText) !== ''): ?>
+<!-- ============================================================ OFFER STRIP -->
+<div class="offer-strip">
+  <?= htmlspecialchars($offerText) ?>
+  <a href="<?= APP_URL ?>/register.php">હમણાં જ Register કરો →</a>
+</div>
+<?php endif; ?>
 
 <!-- ============================================================ HERO -->
 <section class="hero">
@@ -436,6 +560,23 @@ $helplineTel = preg_replace('/[^0-9+]/', '', $helplineNumber) ?? '';
   </div>
 </section>
 <?php endif; ?>
+
+<!-- ============================================================ FAQ -->
+<section id="faq" style="background:linear-gradient(180deg,#f8fafc,#fff)">
+  <div class="container">
+    <div class="section-eyebrow">FAQ</div>
+    <h2 class="section-title">Frequently Asked Questions</h2>
+    <p class="section-sub">Everything about the Google review QR stand, pricing and the free offer.</p>
+    <div class="faq-list">
+      <?php foreach ($faqs as $faq): ?>
+        <details class="faq-item">
+          <summary><?= htmlspecialchars((string)($faq['q'] ?? '')) ?></summary>
+          <div class="faq-a"><?= htmlspecialchars((string)($faq['a'] ?? '')) ?></div>
+        </details>
+      <?php endforeach; ?>
+    </div>
+  </div>
+</section>
 
 <!-- ============================================================ FINAL CTA -->
 <section>

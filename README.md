@@ -116,6 +116,27 @@ Configured via Global Settings. Used by:
 - Admin "Send Test WhatsApp" tool
 - Future notifications (`WhatsAppService::sendText` / `sendMedia`)
 
+## SEO & Public Landing
+
+- `public/index.php` carries full on-page SEO: meta title/description/
+  keywords (override via `seo_title`, `seo_description`, `seo_keywords`
+  settings), canonical, Open Graph/Twitter cards, geo tags and JSON-LD
+  (SoftwareApplication + Organization + FAQPage).
+- Visible FAQ section is driven by the `landing_faqs` JSON setting
+  (defaults included); the promo strip by `landing_offer_enabled` /
+  `landing_offer_text`.
+- `public/robots.txt` + `public/sitemap.php` (submit the sitemap URL in
+  Google Search Console).
+
+## Location Offer (Devbhumi Dwarka FREE)
+
+Registration captures City + District (Gujarat district dropdown;
+migration `2026_08_05_client_city_district.sql`). Districts listed in
+the `special_district_names` setting (default "Devbhumi Dwarka") get
+`special_district_trial_days` free validity (default 1095 = 3 years)
+instead of the standard `signup_subscription_trial_days`. Both editable
+in Admin → Global Settings.
+
 ## GitHub Auto Update System
 
 `admin_system_update.php` (Admin → System Update) deploys the app straight

@@ -33,7 +33,9 @@ require __DIR__ . '/partials/layout_head.php';
       <div><label>Master API Key (Admin Only)</label><input name="master_api_key" value="<?= htmlspecialchars($masterApiKey) ?>" required></div>
       <div><label>Price per Review (credits)</label><input type="number" min="1" step="1" name="price_per_review" value="<?= (int)$pricePerReview ?>" required></div>
       <div><label>Sign-up Bonus Amount (credits)</label><input type="number" min="0" step="1" name="signup_bonus_amount" value="<?= (int)$signupBonusAmount ?>"><div style="font-size:.78rem;color:#475569;margin-top:4px">New businesses are auto-credited this amount on registration. Set to 0 to disable.</div></div>
-      <div><label>Sign-up free validity (days)</label><input type="number" min="0" step="1" name="signup_subscription_trial_days" value="<?= (int)$signupSubscriptionTrialDays ?>"><div class="hint">Free platform days on new registration (e.g. 30). 0 = must recharge before QR works.</div></div>
+      <div><label>Sign-up free validity (days)</label><input type="number" min="0" step="1" name="signup_subscription_trial_days" value="<?= (int)$signupSubscriptionTrialDays ?>"><div class="hint">Free platform days on new registration (e.g. 90 = 3 months). 0 = must recharge before QR works.</div></div>
+      <div><label>Special FREE districts</label><input name="special_district_names" value="<?= htmlspecialchars($specialDistrictNames ?? '') ?>" placeholder="Devbhumi Dwarka"><div class="hint">Comma separated district names. Businesses registering from these districts get the special free validity below.</div></div>
+      <div><label>Special district free validity (days)</label><input type="number" min="0" step="1" name="special_district_trial_days" value="<?= (int)($specialDistrictTrialDays ?? 1095) ?>"><div class="hint">e.g. 1095 = 3 years FREE for special districts (Devbhumi Dwarka offer).</div></div>
       <div>
         <label>Default Welcome Standee Template</label>
         <select name="default_welcome_standee_template_id">

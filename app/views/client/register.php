@@ -30,6 +30,24 @@
       <div><label>Password *</label><input type="password" name="password" required></div>
       <div><label>Mobile *</label><input name="mobile" required></div>
       <div><label>Category *</label><select name="category_id" required><option value="">Select Category</option><?php foreach ($categories as $cat): ?><option value="<?= (int)$cat['id'] ?>"><?= htmlspecialchars($cat['category_name']) ?></option><?php endforeach; ?></select></div>
+      <div><label>City / Village *</label><input name="city" required placeholder="e.g. Dwarka, Khambhalia"></div>
+      <div><label>District *</label>
+        <select name="district" required>
+          <option value="">Select District</option>
+          <?php
+            $gujaratDistricts = [
+                'Devbhumi Dwarka', 'Jamnagar', 'Rajkot', 'Porbandar', 'Junagadh', 'Morbi', 'Kutch',
+                'Gir Somnath', 'Amreli', 'Bhavnagar', 'Botad', 'Surendranagar', 'Ahmedabad',
+                'Gandhinagar', 'Kheda', 'Anand', 'Vadodara', 'Bharuch', 'Surat', 'Navsari',
+                'Valsad', 'Tapi', 'Dang', 'Narmada', 'Chhota Udaipur', 'Panchmahal', 'Dahod',
+                'Mahisagar', 'Aravalli', 'Sabarkantha', 'Banaskantha', 'Patan', 'Mehsana', 'Other',
+            ];
+          ?>
+          <?php foreach ($gujaratDistricts as $d): ?>
+            <option value="<?= htmlspecialchars($d) ?>"><?= htmlspecialchars($d) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
     </div>
     <div style="margin-top:10px"><label>Address *</label><textarea name="address" required></textarea></div>
     <div style="margin-top:10px">

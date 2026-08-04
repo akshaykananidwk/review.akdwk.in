@@ -47,6 +47,8 @@ final class ClientController
         $password = $_POST['password'] ?? '';
         $mobile = trim($_POST['mobile'] ?? '');
         $address = trim($_POST['address'] ?? '');
+        $city = trim($_POST['city'] ?? '');
+        $district = trim($_POST['district'] ?? '');
         $categoryId = (int)($_POST['category_id'] ?? 0);
         $googlePlaceId = trim($_POST['google_place_id'] ?? '');
         $selectedFacilities = $_POST['facilities'] ?? [];
@@ -57,6 +59,8 @@ final class ClientController
         if (strlen($password) < 8) $errors[] = 'Password must be at least 8 characters.';
         if ($mobile === '') $errors[] = 'Mobile number is required.';
         if ($address === '') $errors[] = 'Address is required.';
+        if ($city === '') $errors[] = 'City / Village is required.';
+        if ($district === '') $errors[] = 'Please select your district.';
         if ($categoryId <= 0) $errors[] = 'Please select a category.';
         if ($googlePlaceId === '') $errors[] = 'Google Place ID is required.';
 
@@ -84,6 +88,19 @@ final class ClientController
                 ':m' => $mobile, ':a' => $address, ':c' => $categoryId, ':g' => $googlePlaceId
             ]);
             $clientId = (int)$pdo->lastInsertId();
+
+            if ($city !== '' || $district !== '') {
+                try {
+                    $pdo->prepare('UPDATE clients SET city = :city, district = :district WHERE id = :id')
+                        ->execute([
+                            ':city' => $city !== '' ? substr($city, 0, 100) : null,
+                            ':district' => $district !== '' ? substr($district, 0, 100) : null,
+                            ':id' => $clientId,
+                        ]);
+                } catch (Throwable) {
+                    // city/district columns arrive with the 2026_08_05 migration
+                }
+            }
 
             if (is_array($selectedFacilities)) {
                 if ($this->hasFacilitiesCategoryColumn($pdo)) {
@@ -153,6 +170,21 @@ final class ClientController
             }
 
             $trialDays = max(0, (int)getSystemSetting($pdo, 'signup_subscription_trial_days', '30'));
+
+            // Location offer: businesses from the configured special
+            // districts (default: Devbhumi Dwarka) get the longer free
+            // validity instead of the standard trial.
+            $specialDistricts = array_filter(array_map(
+                static fn(string $d): string => mb_strtolower(trim($d)),
+                explode(',', getSystemSetting($pdo, 'special_district_names', 'Devbhumi Dwarka'))
+            ));
+            if ($district !== '' && in_array(mb_strtolower($district), $specialDistricts, true)) {
+                $specialDays = max(0, (int)getSystemSetting($pdo, 'special_district_trial_days', '1095'));
+                if ($specialDays > $trialDays) {
+                    $trialDays = $specialDays;
+                }
+            }
+
             if ($trialDays > 0) {
                 try {
                     $pdo->prepare("UPDATE clients SET subscription_valid_until = DATE_ADD(CURDATE(), INTERVAL {$trialDays} DAY) WHERE id = :id")

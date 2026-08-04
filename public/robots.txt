@@ -1,0 +1,23 @@
+User-agent: *
+Allow: /$
+Allow: /index.php
+Allow: /register.php
+Allow: /login.php
+Allow: /demo.php
+Disallow: /super_admin.php
+Disallow: /admin_
+Disallow: /client_
+Disallow: /dashboard
+Disallow: /reseller_
+Disallow: /review.php
+Disallow: /review_api.php
+Disallow: /run_cron.php
+Disallow: /razorpay_
+Disallow: /subscription_
+Disallow: /standee_
+Disallow: /uploads/
+Disallow: /reset_password.php
+Disallow: /forgot_password.php
+Disallow: /logout.php
+
+Sitemap: https://review.akdwk.in/sitemap.php
