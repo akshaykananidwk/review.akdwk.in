@@ -58,13 +58,23 @@ $runStatusBadge = static function (string $status): string {
     <div class="err">Job <strong><?= htmlspecialchars((string)$fj['job_name']) ?></strong> failed on its last run<?= $fj['last_run_at'] ? ' (' . htmlspecialchars((string)$fj['last_run_at']) . ')' : '' ?>: <?= htmlspecialchars((string)($fj['last_error'] ?? '')) ?></div>
   <?php endforeach; ?>
 
-  <h4 style="color:var(--peacock);margin-bottom:6px">Server setup — only ONE cron line is needed</h4>
-  <pre style="background:#0f172a;color:#e2e8f0;border-radius:10px;padding:12px;font-size:.8rem;overflow-x:auto">* * * * *  /usr/bin/php <?= htmlspecialchars($projectRoot) ?>/cron/master.php >> /dev/null 2>&1</pre>
+  <h4 style="color:var(--peacock);margin-bottom:6px">Server setup — only ONE cron is needed (pick either option)</h4>
+  <p style="color:var(--muted);font-size:.85rem;margin:4px 0 6px">
+    <strong>Option A — Shell script cron</strong> (every 1 minute). Detected PHP CLI on this server:
+    <code><?= htmlspecialchars($phpCliPath) ?></code>
+  </p>
+  <pre style="background:#0f172a;color:#e2e8f0;border-radius:10px;padding:12px;font-size:.8rem;overflow-x:auto"><?= htmlspecialchars($phpCliPath) ?> <?= htmlspecialchars($projectRoot) ?>/cron/master.php</pre>
+  <p style="color:var(--muted);font-size:.85rem;margin:10px 0 6px">
+    <strong>Option B — URL cron</strong> (easiest on AAPanel: cron type "Access URL", every 1 minute)
+    <?= $cronSecretSet ? '' : ' — <span style="color:#991b1b;font-weight:700">set REFILL_CRON_SECRET in .env first!</span>' ?>
+  </p>
+  <?php if ($cronSecretSet): ?>
+    <pre style="background:#0f172a;color:#e2e8f0;border-radius:10px;padding:12px;font-size:.8rem;overflow-x:auto"><?= htmlspecialchars(APP_URL) ?>/run_cron.php?key=<?= htmlspecialchars($cronSecret) ?></pre>
+  <?php endif; ?>
   <p style="color:var(--muted);font-size:.85rem;margin-bottom:0">
-    No CLI cron on your host? Call the HTTP fallback every minute instead:
-    <code><?= htmlspecialchars(APP_URL) ?>/run_cron.php?key=&lt;REFILL_CRON_SECRET&gt;</code>
-    <?= $cronSecretSet ? '<span style="color:#065f46;font-weight:700">(secret configured ✓)</span>' : '<span style="color:#991b1b;font-weight:700">(set REFILL_CRON_SECRET in .env first!)</span>' ?>
-    — old per-task crontab lines can be removed; they now delegate to this scheduler anyway.
+    Tip: run the shell command once by hand (SSH) to see its output — if it prints an error, the PHP
+    path is wrong or an extension is missing. Old per-task crontab lines can be removed; they now
+    delegate to this scheduler anyway.
   </p>
 </div>
 

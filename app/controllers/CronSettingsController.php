@@ -95,12 +95,38 @@ final class CronSettingsController
 
         $reminderDays = getSystemSetting($pdo, 'subscription_reminder_days', '3,1,0');
         $walletThreshold = (int)getSystemSetting($pdo, 'wallet_low_balance_threshold', '0');
-        $cronSecretSet = strlen(BootstrapEnv::envString('REFILL_CRON_SECRET', '')) >= 32;
+        $cronSecret = BootstrapEnv::envString('REFILL_CRON_SECRET', '');
+        $cronSecretSet = strlen($cronSecret) >= 32;
         $projectRoot = rtrim(str_replace('\\', '/', dirname(__DIR__, 2)), '/');
+        $phpCliPath = $this->detectPhpCliPath();
         $csrfToken = csrfGenerateToken();
 
         $pageTitle = 'Cron Settings';
         $activeMenu = 'cron';
         require __DIR__ . '/../views/admin/cron_settings.php';
+    }
+
+    /**
+     * Best-effort detection of the CLI php binary for the crontab line.
+     * Under php-fpm (e.g. AAPanel: /www/server/php/82/sbin/php-fpm) the
+     * CLI usually lives in the sibling bin/ directory — /usr/bin/php
+     * often does not exist at all on such servers.
+     */
+    private function detectPhpCliPath(): string
+    {
+        $candidates = [];
+        if (defined('PHP_BINARY') && PHP_BINARY !== '') {
+            $base = str_replace('\\', '/', dirname(PHP_BINARY, 2));
+            $candidates[] = $base . '/bin/php';
+        }
+        $candidates[] = rtrim(str_replace('\\', '/', PHP_BINDIR), '/') . '/php';
+        $candidates[] = '/usr/bin/php';
+        $candidates[] = '/usr/local/bin/php';
+        foreach ($candidates as $candidate) {
+            if ($candidate !== '' && @is_file($candidate) && @is_executable($candidate)) {
+                return $candidate;
+            }
+        }
+        return 'php'; // fall back to PATH lookup
     }
 }
