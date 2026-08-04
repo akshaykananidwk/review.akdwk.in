@@ -86,6 +86,41 @@ Configured via Global Settings. Used by:
 - Admin "Send Test WhatsApp" tool
 - Future notifications (`WhatsAppService::sendText` / `sendMedia`)
 
+## GitHub Auto Update System
+
+`admin_system_update.php` (Admin → System Update) deploys the app straight
+from GitHub — no more ZIP uploads.
+
+**One-time setup**
+
+1. Open Admin → System Update and click **Install Update System** (creates
+   `system_updates`, `system_update_backups`, `system_migrations` — or run
+   `database/migrations/2026_08_04_github_auto_update_system.sql` manually).
+2. Save the GitHub repository (`owner/name`), branch and a Personal Access
+   Token with `repo` read access. The token is write-only (never displayed).
+
+**How it works**
+
+- **Check for Update** compares the recorded commit with the branch head and
+  shows version, commit hash/message/author/date, changed files and release
+  notes — or "Already Up To Date".
+- **Update Now** runs automatically with a live progress bar:
+  backup (code ZIP + DB dump) → download zipball → verify (zip-slip guard,
+  required files, `php -l` syntax check) → deploy (atomic per-file swap) →
+  run new `database/migrations/*.sql` → finalize (permissions, OPcache +
+  cache clear, version record).
+- **Safety**: any failure after deploy triggers an automatic rollback of both
+  code and database from the pre-update backup. Manual rollback to any stored
+  backup is available in Backup History.
+- **Never touched** by update, backup or rollback: `.env`,
+  `app/config/config.php`, `public/uploads/`, `storage/` (logs/backups),
+  `public/.well-known/`.
+- Version comes from the repo root `VERSION` file; update/rollback/backup
+  history and per-step logs are stored in the DB and `storage/logs/updater.log`.
+- Migrations already on disk are baselined as applied on first use; only
+  migration files added by future updates are executed (tracked in
+  `system_migrations`).
+
 ## Notes
 
 - QR generation tries `phpqrcode` then falls back to api.qrserver.com.
