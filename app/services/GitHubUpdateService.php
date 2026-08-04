@@ -515,7 +515,75 @@ final class GitHubUpdateService
         } else {
             $this->logUpdate($updateId, 'PHP syntax check skipped (' . $lintResult['reason'] . ').');
         }
+
+        // Writability preflight: fail HERE, before a single live file is
+        // touched, instead of mid-deploy (which would force a rollback).
+        $plan = $this->buildDeployPlan($releaseRoot);
+        if ($plan['problems'] !== []) {
+            $shown = array_slice($plan['problems'], 0, 10);
+            throw new RuntimeException(
+                'Deploy preflight failed — the PHP user cannot write ' . count($plan['problems'])
+                . ' target path(s): ' . implode('; ', $shown)
+                . (count($plan['problems']) > 10 ? '; …' : '')
+                . '. Fix ownership/permissions on the server, e.g. chown the project to the web user'
+                . ' or `chmod -R u+w` those directories, then run the update again. Nothing was changed.'
+            );
+        }
+        $this->logUpdate($updateId, 'Write preflight passed: ' . count($plan['changed'])
+            . ' file(s) to update, ' . $plan['identical'] . ' unchanged file(s) will be skipped.');
         $this->advance($updateId, 'verify');
+    }
+
+    /**
+     * Compare every staged file against the live tree.
+     *
+     * @return array{changed:string[], identical:int, problems:string[]}
+     *   changed  — relative paths whose content differs or that are new
+     *   problems — human-readable descriptions of unwritable targets
+     *              (only for paths that actually need writing)
+     */
+    private function buildDeployPlan(string $releaseRoot): array
+    {
+        $changed = [];
+        $identical = 0;
+        $problems = [];
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($releaseRoot, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::LEAVES_ONLY
+        );
+        foreach ($iterator as $item) {
+            /** @var SplFileInfo $item */
+            if (!$item->isFile()) {
+                continue;
+            }
+            $relative = ltrim(str_replace('\\', '/', substr($item->getPathname(), strlen($releaseRoot))), '/');
+            if ($relative === '' || $this->isProtectedPath($relative)) {
+                continue;
+            }
+            $target = $this->rootDir . '/' . $relative;
+
+            if (is_file($target) && hash_file('sha256', $target) === hash_file('sha256', $item->getPathname())) {
+                $identical++;
+                continue;
+            }
+            $changed[] = $relative;
+
+            // The deploy writes a temp file next to the target and renames
+            // it, so what must be writable is the containing directory
+            // (nearest existing ancestor for brand-new paths).
+            $dir = dirname($target);
+            while (!is_dir($dir) && strlen($dir) > strlen($this->rootDir)) {
+                $dir = dirname($dir);
+            }
+            if (!is_writable($dir)) {
+                @chmod($dir, 0755); // cheap self-heal when the web user owns it
+            }
+            if (!is_writable($dir)) {
+                $problems[] = $relative . ' (directory not writable: ' . $dir . ')';
+            }
+        }
+        return ['changed' => $changed, 'identical' => $identical, 'problems' => array_values(array_unique($problems))];
     }
 
     private function stepDeploy(array $update): void
@@ -527,6 +595,7 @@ final class GitHubUpdateService
 
         $deployed = 0;
         $skipped = 0;
+        $identical = 0;
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($releaseRoot, FilesystemIterator::SKIP_DOTS),
             RecursiveIteratorIterator::SELF_FIRST
@@ -545,6 +614,13 @@ final class GitHubUpdateService
                 }
                 continue;
             }
+            // Unchanged files are left completely untouched — this keeps
+            // the write surface (and permission requirements) down to the
+            // files that actually differ in this release.
+            if (is_file($target) && hash_file('sha256', $target) === hash_file('sha256', $item->getPathname())) {
+                $identical++;
+                continue;
+            }
             $dir = dirname($target);
             if (!is_dir($dir)) {
                 @mkdir($dir, 0755, true);
@@ -552,19 +628,23 @@ final class GitHubUpdateService
             // Copy to a temp file in the same directory, then rename for
             // an atomic per-file swap (no half-written PHP is ever served).
             $tmp = $target . '.updater_tmp';
+            error_clear_last();
             if (!@copy($item->getPathname(), $tmp)) {
+                $reason = error_get_last()['message'] ?? 'unknown filesystem error';
                 @unlink($tmp);
-                throw new RuntimeException('Failed to write file during deploy: ' . $relative);
+                throw new RuntimeException('Failed to write file during deploy: ' . $relative . ' — ' . $reason);
             }
             if (!@rename($tmp, $target)) {
+                $reason = error_get_last()['message'] ?? 'unknown filesystem error';
                 @unlink($tmp);
-                throw new RuntimeException('Failed to activate file during deploy: ' . $relative);
+                throw new RuntimeException('Failed to activate file during deploy: ' . $relative . ' — ' . $reason);
             }
             @chmod($target, 0644);
             $deployed++;
         }
 
-        $this->logUpdate($updateId, 'Deploy complete: ' . $deployed . ' files updated, ' . $skipped . ' protected paths preserved.');
+        $this->logUpdate($updateId, 'Deploy complete: ' . $deployed . ' file(s) updated, '
+            . $identical . ' unchanged file(s) skipped, ' . $skipped . ' protected path(s) preserved.');
         $this->advance($updateId, 'deploy');
     }
 
@@ -714,13 +794,70 @@ final class GitHubUpdateService
         $dumpAbs = $this->rootDir . '/' . ltrim((string)$backup['db_dump_path'], '/');
         if (is_file($dumpAbs)) {
             $this->logUpdate($historyUpdateId, 'Restoring database from ' . basename($dumpAbs) . ' ...');
+            // The dump predates rows written since the backup was taken —
+            // snapshot the updater's own history so the restore does not
+            // erase update/backup records (or this very run's log).
+            $preservedBackups = $this->pdo->query('SELECT * FROM system_update_backups')->fetchAll();
+            $preservedUpdates = $this->pdo->query('SELECT * FROM system_updates')->fetchAll();
             $statements = $this->restoreDatabase($dumpAbs);
-            $this->logUpdate($historyUpdateId, 'Database restored (' . $statements . ' statements executed).');
+            $this->reinstateHistoryRows('system_update_backups', $preservedBackups);
+            $this->reinstateHistoryRows('system_updates', $preservedUpdates);
+            $this->logUpdate($historyUpdateId, 'Database restored (' . $statements . ' statements executed); update/backup history preserved.');
         }
 
         $this->pdo->prepare("
             UPDATE system_update_backups SET status = 'restored', restored_at = NOW() WHERE id = :id
         ")->execute([':id' => $backupId]);
+    }
+
+    /**
+     * Upsert pre-restore history rows back into a freshly restored table
+     * (by explicit id). Columns are intersected with the restored schema
+     * so restoring an older schema can never make this throw.
+     *
+     * @param array<int,array<string,mixed>> $rows
+     */
+    private function reinstateHistoryRows(string $table, array $rows): void
+    {
+        if ($rows === [] || preg_match('/^[a-z_]+$/', $table) !== 1) {
+            return;
+        }
+        try {
+            $columns = $this->pdo->query("SHOW COLUMNS FROM `{$table}`")->fetchAll(PDO::FETCH_COLUMN);
+        } catch (Throwable) {
+            return;
+        }
+        $columnSet = array_flip(array_map('strval', $columns));
+
+        $this->pdo->exec('SET FOREIGN_KEY_CHECKS=0');
+        try {
+            foreach ($rows as $row) {
+                $data = array_intersect_key($row, $columnSet);
+                if ($data === [] || !isset($data['id'])) {
+                    continue;
+                }
+                $cols = array_keys($data);
+                $colSql = implode(',', array_map(static fn(string $c): string => "`{$c}`", $cols));
+                $placeholders = implode(',', array_map(static fn(string $c): string => ':' . $c, $cols));
+                $updates = implode(',', array_map(
+                    static fn(string $c): string => "`{$c}` = VALUES(`{$c}`)",
+                    array_diff($cols, ['id'])
+                ));
+                $sql = "INSERT INTO `{$table}` ({$colSql}) VALUES ({$placeholders})"
+                    . ($updates !== '' ? " ON DUPLICATE KEY UPDATE {$updates}" : '');
+                try {
+                    $stmt = $this->pdo->prepare($sql);
+                    foreach ($data as $col => $value) {
+                        $stmt->bindValue(':' . $col, $value);
+                    }
+                    $stmt->execute();
+                } catch (Throwable) {
+                    // A single unrestorable row must never break the rollback.
+                }
+            }
+        } finally {
+            $this->pdo->exec('SET FOREIGN_KEY_CHECKS=1');
+        }
     }
 
     // ------------------------------------------------------------------
