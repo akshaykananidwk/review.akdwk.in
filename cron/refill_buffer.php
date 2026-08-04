@@ -26,6 +26,23 @@ if (!$isCli) {
 }
 
 $pdo = getPDO();
+
+// Plain runs are delegated to the centralized scheduler (locking +
+// history + reschedule, so the master cron won't run it again right
+// away). The forced-reset/single-client maintenance path below keeps
+// its original standalone behaviour.
+if (!$forceReset && $forceClientId === 0) {
+    require_once __DIR__ . '/../app/services/CronService.php';
+    $cron = new CronService($pdo);
+    if ($cron->cronTablesExist()) {
+        $cron->syncRegistry();
+        $run = $cron->runJob('refill_buffer', 'manual');
+        $line = 'refill_buffer: ' . $run['status'] . ($run['summary'] !== '' ? ' — ' . $run['summary'] : '');
+        echo $line . "\n";
+        exit($run['status'] === 'failed' ? 1 : 0);
+    }
+}
+
 $ai = new AiReviewService($pdo);
 $targetBufferCount = AiReviewService::BUFFER_TARGET;
 

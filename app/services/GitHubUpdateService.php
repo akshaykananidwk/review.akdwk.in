@@ -378,14 +378,43 @@ final class GitHubUpdateService
     private function stepBackup(array $update, int $adminId): void
     {
         $updateId = (int)$update['id'];
-        $stamp = date('Ymd_His');
-        $name = 'backup_' . $stamp;
+        $this->createBackup(
+            $adminId,
+            (string)$update['from_commit'],
+            (string)$update['from_version'],
+            'backup',
+            function (string $msg) use ($updateId): void {
+                $this->logUpdate($updateId, $msg);
+            },
+            $updateId
+        );
+        $this->advance($updateId, 'backup');
+    }
+
+    /**
+     * Create a full code + database backup and record it in
+     * system_update_backups. Used by the update flow (with $linkUpdateId)
+     * and by the AutoBackupJob cron (standalone). Returns the backup id.
+     */
+    public function createBackup(
+        ?int $adminId,
+        ?string $commitHash = null,
+        ?string $version = null,
+        string $namePrefix = 'backup',
+        ?callable $log = null,
+        ?int $linkUpdateId = null
+    ): int {
+        $log = $log ?? static function (string $msg): void {};
+        $commitHash = $commitHash !== null && $commitHash !== '' ? $commitHash : $this->getCurrentCommit();
+        $version = $version !== null && $version !== '' ? $version : $this->getCurrentVersion();
+
+        $name = $namePrefix . '_' . date('Ymd_His');
         $zipPath = $this->backupsDir . '/' . $name . '_files.zip';
         $dumpPath = $this->backupsDir . '/' . $name . '_db.sql';
 
-        $this->logUpdate($updateId, 'Creating file backup: ' . basename($zipPath));
+        $log('Creating file backup: ' . basename($zipPath));
         $fileCount = $this->zipDirectory($this->rootDir, $zipPath);
-        $this->logUpdate($updateId, 'File backup done (' . $fileCount . ' files, ' . $this->humanBytes((int)filesize($zipPath)) . ').');
+        $log('File backup done (' . $fileCount . ' files, ' . $this->humanBytes((int)filesize($zipPath)) . ').');
 
         // Insert the backup record BEFORE dumping the database so that a
         // later DB rollback (which restores this dump) still contains the
@@ -399,23 +428,25 @@ final class GitHubUpdateService
             ':n' => $name,
             ':f' => 'storage/backups/' . basename($zipPath),
             ':d' => 'storage/backups/' . basename($dumpPath),
-            ':c' => substr((string)$update['from_commit'], 0, 64),
-            ':v' => substr((string)$update['from_version'], 0, 32),
+            ':c' => substr($commitHash, 0, 64),
+            ':v' => substr($version, 0, 32),
             ':s' => (int)filesize($zipPath),
             ':a' => $adminId,
         ]);
         $backupId = (int)$this->pdo->lastInsertId();
-        $this->pdo->prepare("UPDATE system_updates SET backup_id = :b WHERE id = :id")
-            ->execute([':b' => $backupId, ':id' => $updateId]);
+        if ($linkUpdateId !== null) {
+            $this->pdo->prepare("UPDATE system_updates SET backup_id = :b WHERE id = :id")
+                ->execute([':b' => $backupId, ':id' => $linkUpdateId]);
+        }
 
-        $this->logUpdate($updateId, 'Creating database backup: ' . basename($dumpPath));
+        $log('Creating database backup: ' . basename($dumpPath));
         $tables = $this->dumpDatabase($dumpPath);
-        $this->logUpdate($updateId, 'Database backup done (' . $tables . ' tables, ' . $this->humanBytes((int)filesize($dumpPath)) . ').');
+        $log('Database backup done (' . $tables . ' tables, ' . $this->humanBytes((int)filesize($dumpPath)) . ').');
         $this->pdo->prepare("UPDATE system_update_backups SET size_bytes = :s WHERE id = :id")
             ->execute([':s' => (int)filesize($zipPath) + (int)filesize($dumpPath), ':id' => $backupId]);
 
         $this->pruneOldBackups();
-        $this->advance($updateId, 'backup');
+        return $backupId;
     }
 
     private function stepDownload(array $update): void

@@ -66,17 +66,47 @@ The system now runs on a pure wallet/credit model — there is no quota.
 - All movements are visible to the client at `/client_wallet.php` and to
   the admin at `/admin_wallet.php?client_id=ID`.
 
-## Daily Review Summary Cron
+## Centralized Cron Scheduler
 
-`cron/daily_review_summary.php` sends a per-client WhatsApp summary at
-22:00 IST. Schedule it with crontab (server in IST):
+The application needs exactly **one** server cron, running every minute:
 
 ```
-0 22 * * *  /usr/bin/php /var/www/google-rev/cron/daily_review_summary.php
+* * * * *  /usr/bin/php /path/to/project/cron/master.php >> /dev/null 2>&1
 ```
 
-If your server is on UTC, use `30 16 * * *`. Logs are written to
-`storage/logs/cron_daily_summary.log`.
+No CLI cron on the host? Hit the HTTP fallback every minute instead:
+`/run_cron.php?key=<REFILL_CRON_SECRET>`.
+
+The master tick executes every registered background task when due —
+AI buffer refill, daily review summary report, subscription/payment-due
+reminders, wallet low-balance reminders, the WhatsApp/email notification
+queue, automatic backups and housekeeping. Everything is managed from
+**Admin → Cron Settings**: status, last/next run, execution history with
+per-run logs, enable/disable, Run Now, retry failed runs and master-cron
+health monitoring. One-time install button creates `cron_jobs`,
+`cron_job_runs` and `notification_queue` (or run
+`database/migrations/2026_08_05_centralized_cron_scheduler.sql`).
+
+**Adding a new scheduled task** (no new server cron, ever):
+
+1. Create `app/cron_jobs/<Name>Job.php` with
+   `run(PDO $pdo, CronLogger $log): string`.
+2. Register it in `app/cron_jobs/registry.php` (key, class, schedule).
+
+MySQL `GET_LOCK` guards the master tick and each job, so overlapping
+ticks and duplicate executions are impossible. Runs are logged to
+`cron_job_runs` and `storage/logs/cron_master.log`.
+
+Queue messages (reminders, follow-ups, scheduled notifications) go
+through `queueWhatsAppMessage()` in
+`app/helpers/notification_queue_helper.php` — delivery, retries with
+backoff and dedupe keys are handled by the queue job.
+
+Legacy entries `cron/daily_review_summary.php` and
+`cron/refill_buffer.php` still work but simply delegate to the
+scheduler (the forced buffer-reset tool
+`run_cron.php?key=…&force_reset=true[&client_id=N]` keeps its original
+behaviour). Old per-task crontab lines can be removed.
 
 ## WhatsApp Gateway (bulk.akdwk.in)
 
