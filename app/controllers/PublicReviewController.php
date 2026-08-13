@@ -119,6 +119,14 @@ final class PublicReviewController
             return;
         }
 
+        // A customer may change their mind after the review text was already
+        // delivered and billed. Downgrading to 1-3 stars means the business
+        // gets a complaint instead of a Google review, so the charge must be
+        // reversed and the buffered review returned to the pool.
+        if ($rating <= 3) {
+            $this->reverseDeliveryIfAny($pdo, (int)$session['id']);
+        }
+
         $flowType = $rating <= 3 ? 'internal_feedback' : 'google_redirect';
         $u = $pdo->prepare("UPDATE review_sessions SET customer_rating = :r, flow_type = :f, rating_submitted_at = NOW() WHERE id = :id");
         $u->execute([':r' => $rating, ':f' => $flowType, ':id' => (int)$session['id']]);
@@ -272,20 +280,46 @@ final class PublicReviewController
         }
 
         if ($allocated === null) {
-            // Buffer empty. Graceful path: still send them to Google, do
-            // not bill, and ask the background worker to refill.
+            // Buffer empty. The customer is still routed to Google, so the
+            // business still gets the commercial outcome - which means this
+            // path must carry the same commercial gate as the normal one.
+            // Leaving it unbilled made every scan free the moment a busy
+            // venue drained its 5-review buffer inside one refill window.
             $this->queueBufferRefill($pdo, (int)$session['client_id']);
-            Logger::warning(Logger::CH_AI, 'Review buffer empty at customer request', [
+            Logger::critical(Logger::CH_AI, 'Review buffer empty at customer request', [
                 'client_id' => (int)$session['client_id'],
                 'session_id' => (int)$session['id'],
+                'hint' => 'Raise the AI buffer target or the refill frequency in Admin > Cron Settings.',
             ]);
+
+            try {
+                $billed = $this->billFallbackDelivery($pdo, (int)$session['id'], (int)$session['client_id']);
+            } catch (InsufficientCreditsException) {
+                echo json_encode([
+                    'ok' => false,
+                    'code' => 'insufficient_credits',
+                    'message' => 'This business has paused review collection. Thank you for visiting!',
+                ]);
+                return;
+            } catch (Throwable $e) {
+                $ref = Logger::error(Logger::CH_WALLET, 'Fallback billing failed', [
+                    'session_id' => (int)$session['id'],
+                ], $e);
+                echo json_encode([
+                    'ok' => false,
+                    'message' => 'Something went wrong. Reference: ' . $ref,
+                    'reference' => $ref,
+                ]);
+                return;
+            }
+
             echo json_encode([
                 'ok' => true,
                 'fallback' => true,
                 'review_text' => '',
                 'google_review_url' => $googleUrl,
                 'message' => 'Please share your experience in your own words on Google.',
-                'billed' => false,
+                'billed' => $billed,
             ]);
             return;
         }
@@ -444,6 +478,165 @@ final class PublicReviewController
             return null;
         }
         return ['id' => (int)$row['id'], 'review_text' => (string)$row['review_text']];
+    }
+
+    /**
+     * Bill a delivery that carried no AI text (buffer was empty). The
+     * customer is still sent to Google, so the same price applies - the
+     * old code charged this case too, via realtime generation.
+     *
+     * Idempotent per session: the wallet ledger already records which
+     * session a debit belongs to, so a retry cannot double-charge.
+     *
+     * @throws InsufficientCreditsException when the client cannot pay
+     */
+    private function billFallbackDelivery(PDO $pdo, int $sessionId, int $clientId): bool
+    {
+        $pricePerReview = $this->getPricePerReview($pdo);
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            $pdo->prepare('SELECT id FROM review_sessions WHERE id = :id FOR UPDATE')
+                ->execute([':id' => $sessionId]);
+
+            if ($this->sessionAlreadyBilled($pdo, $sessionId)) {
+                if ($ownsTransaction) {
+                    $pdo->commit();
+                }
+                return true;
+            }
+
+            $balanceStmt = $pdo->prepare('SELECT wallet_balance FROM clients WHERE id = :id LIMIT 1');
+            $balanceStmt->execute([':id' => $clientId]);
+            if ((int)($balanceStmt->fetchColumn() ?: 0) < $pricePerReview) {
+                if ($ownsTransaction) {
+                    $pdo->rollBack();
+                }
+                throw new InsufficientCreditsException('Wallet balance is below the price per review.');
+            }
+
+            $wallet = new WalletService($pdo);
+            $newBalance = $wallet->debit(
+                $clientId,
+                $pricePerReview,
+                WalletService::SOURCE_REVIEW_DEDUCT,
+                'Review delivered to customer (AI buffer empty - customer wrote their own)',
+                $sessionId
+            );
+            if ($newBalance === null) {
+                throw new RuntimeException('Wallet debit failed despite sufficient balance.');
+            }
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+            return true;
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Undo a delivery when the session is downgraded to a low rating:
+     * refund the credit and return the reserved review to the pool.
+     *
+     * Safe to call on a session that was never billed - it simply does
+     * nothing. Never throws: a failed reversal must not block the
+     * customer from leaving their feedback.
+     */
+    private function reverseDeliveryIfAny(PDO $pdo, int $sessionId): void
+    {
+        $ownsTransaction = !$pdo->inTransaction();
+        try {
+            if ($ownsTransaction) {
+                $pdo->beginTransaction();
+            }
+
+            $lock = $pdo->prepare('SELECT client_id, used_pre_generated_review_id FROM review_sessions WHERE id = :id FOR UPDATE');
+            $lock->execute([':id' => $sessionId]);
+            $row = $lock->fetch();
+            if (!$row) {
+                if ($ownsTransaction) {
+                    $pdo->commit();
+                }
+                return;
+            }
+
+            $clientId = (int)$row['client_id'];
+            $reviewId = (int)($row['used_pre_generated_review_id'] ?? 0);
+
+            $debit = $pdo->prepare("
+                SELECT amount FROM wallet_transactions
+                WHERE related_review_session_id = :sid AND txn_type = 'debit'
+                ORDER BY id DESC LIMIT 1
+            ");
+            $debit->execute([':sid' => $sessionId]);
+            $charged = (int)($debit->fetchColumn() ?: 0);
+
+            $refunded = $pdo->prepare("
+                SELECT 1 FROM wallet_transactions
+                WHERE related_review_session_id = :sid AND txn_type = 'credit' AND source = :src
+                LIMIT 1
+            ");
+            $refunded->execute([':sid' => $sessionId, ':src' => WalletService::SOURCE_REFUND]);
+            $alreadyRefunded = (bool)$refunded->fetchColumn();
+
+            if ($charged > 0 && !$alreadyRefunded) {
+                (new WalletService($pdo))->credit(
+                    $clientId,
+                    $charged,
+                    WalletService::SOURCE_REFUND,
+                    'Refund: customer changed the rating to 1-3 stars before posting',
+                    null,
+                    $sessionId
+                );
+                Logger::info(Logger::CH_WALLET, 'Review charge reversed after rating downgrade', [
+                    'session_id' => $sessionId,
+                    'client_id' => $clientId,
+                    'refunded' => $charged,
+                ]);
+            }
+
+            if ($reviewId > 0) {
+                // Return the reserved review to the pool so it is not wasted.
+                $pdo->prepare("
+                    UPDATE pre_generated_reviews
+                    SET status = 'unused', used_in_session_id = NULL, used_at = NULL
+                    WHERE id = :id AND used_in_session_id = :sid
+                ")->execute([':id' => $reviewId, ':sid' => $sessionId]);
+                $pdo->prepare('UPDATE review_sessions SET used_pre_generated_review_id = NULL WHERE id = :id')
+                    ->execute([':id' => $sessionId]);
+            }
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            Logger::error(Logger::CH_WALLET, 'Could not reverse review charge after downgrade', [
+                'session_id' => $sessionId,
+            ], $e);
+        }
+    }
+
+    /** Has this review session already produced a wallet debit? */
+    private function sessionAlreadyBilled(PDO $pdo, int $sessionId): bool
+    {
+        $stmt = $pdo->prepare("
+            SELECT 1 FROM wallet_transactions
+            WHERE related_review_session_id = :sid AND txn_type = 'debit'
+            LIMIT 1
+        ");
+        $stmt->execute([':sid' => $sessionId]);
+        return (bool)$stmt->fetchColumn();
     }
 
     /** Ask the background worker to top the buffer back up. Never throws. */

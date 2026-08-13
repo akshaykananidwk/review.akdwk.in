@@ -441,3 +441,43 @@ TestRunner::ok(
     })(),
     'a session opened before expiry could keep spending afterwards'
 );
+
+// ---------------------------------------------------------------------
+// Adversarial-review findings on the NEW billing model (both confirmed
+// by an independent verifier as regressions this change introduced).
+// ---------------------------------------------------------------------
+TestRunner::ok(
+    'empty-buffer delivery is billed and credit-gated, not free',
+    str_contains($review, 'billFallbackDelivery')
+        && str_contains($review, 'AI buffer empty - customer wrote their own'),
+    'a busy venue draining its 5-review buffer got free service at peak'
+);
+TestRunner::ok(
+    'fallback billing is idempotent via the wallet ledger',
+    str_contains($review, 'sessionAlreadyBilled')
+        && str_contains($review, "related_review_session_id = :sid AND txn_type = 'debit'"),
+    'a retry must not double-charge'
+);
+TestRunner::ok(
+    'an empty buffer is a CRITICAL operational alarm, not a warning',
+    str_contains($review, "Logger::critical(Logger::CH_AI, 'Review buffer empty"),
+    'it silently stopped billing before'
+);
+TestRunner::ok(
+    'downgrading to 1-3 stars refunds the charge and releases the review',
+    str_contains($review, 'reverseDeliveryIfAny')
+        && str_contains($review, 'SOURCE_REFUND')
+        && str_contains($review, "SET status = 'unused', used_in_session_id = NULL"),
+    'the business would otherwise pay for a complaint'
+);
+TestRunner::ok(
+    'the refund is idempotent (ledger row is linked to the session)',
+    str_contains($review, "txn_type = 'credit' AND source = :src")
+        && str_contains(TestRunner::source('app/services/WalletService.php'), '?int $reviewSessionId = null'),
+    'without the link the guard never matches and refunds repeat'
+);
+TestRunner::ok(
+    'stars lock once a review has been delivered',
+    str_contains(TestRunner::source('app/views/public/review.php'), "qa('.star').forEach(b=>{b.disabled=true"),
+    'prevents the accidental downgrade that forces a refund'
+);

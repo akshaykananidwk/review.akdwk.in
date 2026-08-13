@@ -42,7 +42,8 @@ final class WalletService
         int $amount,
         string $source,
         ?string $description = null,
-        ?int $adminId = null
+        ?int $adminId = null,
+        ?int $reviewSessionId = null
     ): ?int {
         $amount = max(0, $amount);
         if ($amount === 0) {
@@ -61,7 +62,7 @@ final class WalletService
 
             $newBalance = (int)$row['wallet_balance'] + $amount;
             $this->updateBalance($clientId, $newBalance);
-            $this->writeLedger($clientId, 'credit', $amount, $newBalance, $source, $description, $adminId, null);
+            $this->writeLedger($clientId, 'credit', $amount, $newBalance, $source, $description, $adminId, $reviewSessionId);
 
             if ($owns) { $this->pdo->commit(); }
             return $newBalance;

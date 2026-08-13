@@ -128,6 +128,10 @@ qa('.star').forEach(btn=>btn.addEventListener('click',async()=>{
       q('#copyPostBtn').disabled=false;
       showOk('Review text is ready.');
     }
+    // The review is now allocated to this session. Lock the stars so a
+    // stray tap cannot downgrade a delivered review (which would force a
+    // refund and waste the buffered text).
+    qa('.star').forEach(b=>{b.disabled=true;b.style.cursor='default';});
   }catch(e){
     q('#reviewText').textContent='';
     showErr((e&&e.message)?e.message:'Unable to load review. Please try again.');
