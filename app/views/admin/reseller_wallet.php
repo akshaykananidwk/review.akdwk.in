@@ -14,6 +14,7 @@ require __DIR__ . '/partials/layout_head.php';
     <a class="btn btn-secondary" href="<?= APP_URL ?>/admin_create_reseller.php" style="display:inline-block;padding:8px 14px;text-decoration:none">+ Create reseller</a>
   </p>
   <form method="post">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="credit_reseller">
     <label>Reseller</label>
     <select name="reseller_admin_id" required>

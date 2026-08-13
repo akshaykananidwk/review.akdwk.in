@@ -48,13 +48,15 @@ DEALLOCATE PREPARE stmt;
 
 -- ---------------------------------------------------------------------
 -- 3) Default WhatsApp gateway settings (key/value rows in system_settings)
+--    SECURITY: credentials are intentionally blank here. Never commit a
+--    live gateway key to version control - set it in Admin > Global Settings.
 --    Only inserted if key does NOT already exist (preserves admin edits).
 -- ---------------------------------------------------------------------
 INSERT INTO system_settings (setting_key, setting_value, value_type, is_encrypted, created_at, updated_at)
 VALUES
 ('whatsapp_endpoint',   'https://bulk.akdwk.in/api.php',                 'string', 0, NOW(), NOW()),
-('whatsapp_api_key',    'c9f5b590100fc385c31b',                          'string', 1, NOW(), NOW()),
-('whatsapp_session_id', 'user_4835_1774094200_1776318138',               'string', 1, NOW(), NOW()),
+('whatsapp_api_key',    '',                          'string', 1, NOW(), NOW()),
+('whatsapp_session_id', '',               'string', 1, NOW(), NOW()),
 ('whatsapp_instance_id','',                                              'string', 0, NOW(), NOW()),
 ('whatsapp_token',      '',                                              'string', 1, NOW(), NOW()),
 ('whatsapp_sender_name','Krishna Review System',                         'string', 0, NOW(), NOW()),

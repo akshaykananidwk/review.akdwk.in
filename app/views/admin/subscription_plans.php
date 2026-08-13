@@ -14,6 +14,7 @@ require __DIR__ . '/partials/layout_head.php';
 <div class="card">
   <h3 style="margin:0 0 10px;color:var(--peacock)">Add subscription plan</h3>
   <form method="post">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="create_sub_plan">
     <div class="grid-form">
       <div><label>Name *</label><input name="name" required placeholder="Platform Monthly"></div>
@@ -54,6 +55,7 @@ require __DIR__ . '/partials/layout_head.php';
               <td><?= (int)$p['is_active'] === 1 ? 'Yes' : 'No' ?></td>
               <td>
                 <form method="post" style="background:#f8fafc;padding:10px;border-radius:10px">
+      <?= csrfField() ?>
                   <input type="hidden" name="action" value="update_sub_plan">
                   <input type="hidden" name="plan_id" value="<?= (int)$p['id'] ?>">
                   <div class="grid-form">
@@ -78,6 +80,7 @@ require __DIR__ . '/partials/layout_head.php';
                   <button class="btn btn-edit" type="submit" style="margin-top:8px">Save</button>
                 </form>
                 <form method="post" style="margin-top:6px" onsubmit="return confirm('Toggle active?')">
+      <?= csrfField() ?>
                   <input type="hidden" name="action" value="toggle_sub_plan">
                   <input type="hidden" name="plan_id" value="<?= (int)$p['id'] ?>">
                   <button class="btn btn-secondary" type="submit">Toggle active</button>

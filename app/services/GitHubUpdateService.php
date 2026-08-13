@@ -643,9 +643,86 @@ final class GitHubUpdateService
             $deployed++;
         }
 
+        $removed = $this->applyRemovalManifest($releaseRoot, $updateId);
+
         $this->logUpdate($updateId, 'Deploy complete: ' . $deployed . ' file(s) updated, '
-            . $identical . ' unchanged file(s) skipped, ' . $skipped . ' protected path(s) preserved.');
+            . $identical . ' unchanged file(s) skipped, ' . $skipped . ' protected path(s) preserved'
+            . ($removed > 0 ? ', ' . $removed . ' obsolete file(s) removed' : '') . '.');
         $this->advance($updateId, 'deploy');
+    }
+
+    /**
+     * Delete files that a release explicitly retires.
+     *
+     * The deploy step only adds and overwrites, so a file removed from
+     * the repository would otherwise stay live on the server forever —
+     * which matters when the removed file is a vulnerable or broken
+     * endpoint. Rather than inferring deletions by diffing the tree
+     * (which risks destroying anything the release does not carry, such
+     * as user uploads), a release states its removals explicitly in
+     * `deploy/removals.txt`.
+     *
+     * Every entry is validated: files only, no traversal, must resolve
+     * inside the project, must sit in a code directory, and must not be
+     * a protected path. Anything else is refused and logged.
+     *
+     * @return int number of files actually removed
+     */
+    private function applyRemovalManifest(string $releaseRoot, int $updateId): int
+    {
+        $manifest = $releaseRoot . '/deploy/removals.txt';
+        if (!is_file($manifest)) {
+            return 0;
+        }
+
+        $allowedRoots = ['app/', 'public/', 'cron/', 'tools/', 'database/'];
+        $removed = 0;
+
+        foreach (preg_split('/\r?\n/', (string)file_get_contents($manifest)) ?: [] as $rawLine) {
+            $relative = trim($rawLine);
+            if ($relative === '' || str_starts_with($relative, '#')) {
+                continue;
+            }
+            $relative = ltrim(str_replace('\\', '/', $relative), '/');
+
+            if (str_contains($relative, '..') || str_contains($relative, "\0")) {
+                $this->logUpdate($updateId, 'Removal refused (unsafe path): ' . $relative);
+                continue;
+            }
+            $inAllowedRoot = false;
+            foreach ($allowedRoots as $root) {
+                if (str_starts_with($relative, $root)) {
+                    $inAllowedRoot = true;
+                    break;
+                }
+            }
+            if (!$inAllowedRoot) {
+                $this->logUpdate($updateId, 'Removal refused (outside code directories): ' . $relative);
+                continue;
+            }
+            if ($this->isProtectedPath($relative)) {
+                $this->logUpdate($updateId, 'Removal refused (protected path): ' . $relative);
+                continue;
+            }
+
+            $target = $this->rootDir . '/' . $relative;
+            if (!is_file($target)) {
+                continue; // already gone — manifests are idempotent
+            }
+            $real = realpath($target);
+            if ($real === false || !str_starts_with(str_replace('\\', '/', $real), $this->rootDir . '/')) {
+                $this->logUpdate($updateId, 'Removal refused (escapes project root): ' . $relative);
+                continue;
+            }
+            if (@unlink($target)) {
+                $removed++;
+                $this->logUpdate($updateId, 'Removed obsolete file: ' . $relative);
+            } else {
+                $this->logUpdate($updateId, 'Could not remove obsolete file: ' . $relative);
+            }
+        }
+
+        return $removed;
     }
 
     private function stepMigrate(array $update): void

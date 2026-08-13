@@ -116,6 +116,58 @@ Configured via Global Settings. Used by:
 - Admin "Send Test WhatsApp" tool
 - Future notifications (`WhatsAppService::sendText` / `sendMedia`)
 
+## Observability
+
+Every entry point installs centralized error handling via
+`app/config/config.php` → `app/config/bootstrap_app.php`:
+
+- Uncaught exceptions, PHP warnings and fatal errors are logged and
+  never rendered to end users in production. Users see only
+  `Something went wrong. Reference: ERR-YYYYMMDD-XXXXXX`.
+- `Logger` (`app/services/Logger.php`) writes JSON lines to
+  `storage/logs/app-YYYY-MM-DD.log` and persists warning-and-above to
+  `system_event_logs`, tagged by channel (`auth`, `security`, `payment`,
+  `wallet`, `ai`, `whatsapp`, `api`, `cron`, `update`).
+- Secrets are redacted before anything is written; the logger never
+  throws, so a logging failure cannot break a request.
+
+Look up an incident a user reported:
+
+```
+grep 'ERR-20260813-A1B2C3' storage/logs/app-*.log
+-- or --
+SELECT * FROM system_event_logs WHERE reference_id = 'ERR-20260813-A1B2C3';
+```
+
+## Rate limiting
+
+`rateLimitHit($action, $identifier, $limit, $windowSeconds)` in
+`app/helpers/rate_limit_helper.php` is a sliding-window limiter backed by
+`rate_limit_buckets`. Applied to login (per email + per IP),
+registration, the public review flow (per session + per IP + per QR) and
+the POS invite API (per key hour/day + per IP). It fails open and logs
+CRITICAL if the table is unavailable, so a limiter outage cannot take the
+site down.
+
+## Testing
+
+```
+php tests/run.php              # all suites
+php tests/run.php p0           # one suite
+```
+
+`*_test.php` are pure-logic and source-structure regression guards that
+run anywhere. `*_db_test.php` are integration tests that **skip** unless
+`TEST_DB_*` environment variables point at a throwaway database:
+
+```
+TEST_DB_HOST=127.0.0.1 TEST_DB_NAME=krs_test TEST_DB_USER=root \
+TEST_DB_PASSWORD=secret php tests/run.php
+```
+
+Never point `TEST_DB_*` at production — the integration suite creates and
+drops its own tables.
+
 ## SEO & Public Landing
 
 - `public/index.php` carries full on-page SEO: meta title/description/

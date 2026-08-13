@@ -25,6 +25,7 @@ require __DIR__ . '/partials/layout_head.php';
 <div class="card">
   <h3 class="section-title">Master Configuration</h3>
   <form method="post" enctype="multipart/form-data">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="save_global_settings">
     <div class="grid">
       <div><label>System Name</label><input name="system_name" value="<?= htmlspecialchars($systemName) ?>" required></div>
@@ -72,6 +73,7 @@ require __DIR__ . '/partials/layout_head.php';
   <h3 class="section-title">WhatsApp API Gateway <span class="badge"><?= $whatsappConfigured ? 'Configured' : 'Not Configured' ?></span></h3>
   <p class="hint">Used to deliver Forgot Password OTP, password reset links and customer notifications via WhatsApp.</p>
   <form method="post">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="save_whatsapp_settings">
     <div class="grid">
       <div>
@@ -110,6 +112,7 @@ require __DIR__ . '/partials/layout_head.php';
   <div class="test-box">
     <h4 style="margin:0 0 8px;color:var(--peacock)">Send Test Message</h4>
     <form method="post">
+      <?= csrfField() ?>
       <input type="hidden" name="action" value="send_whatsapp_test">
       <div class="grid">
         <div><label>Recipient Mobile</label><input name="test_mobile" placeholder="9876543210" required></div>
@@ -124,6 +127,7 @@ require __DIR__ . '/partials/layout_head.php';
   <h3 class="section-title">Razorpay Payment Gateway <span class="badge"><?= !empty($razorpayEnabled) && !empty($razorpayKeyId) && !empty($razorpayKeySecretSet) ? 'Configured' : 'Not Configured' ?></span></h3>
   <p class="hint">Used for client wallet self-recharge (UPI, Cards, NetBanking, Wallets). Get your keys from <a href="https://dashboard.razorpay.com/app/keys" target="_blank" rel="noopener">Razorpay Dashboard → API Keys</a>.</p>
   <form method="post">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="save_razorpay_settings">
     <div class="grid">
       <div>
@@ -166,6 +170,7 @@ require __DIR__ . '/partials/layout_head.php';
   <h3 class="section-title">Public Landing Page (CMS)</h3>
   <p class="hint">Controls everything on your homepage at <code><?= htmlspecialchars(APP_URL) ?>/</code> — the page that loads when someone opens your domain.</p>
   <form method="post">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="save_landing_cms">
     <div class="grid">
       <div style="grid-column:1/-1">
@@ -217,6 +222,7 @@ require __DIR__ . '/partials/layout_head.php';
 <div class="card">
   <h3 class="section-title">Homepage Slider Images</h3>
   <form method="post" enctype="multipart/form-data" class="grid">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="add_slider">
     <div><label>Slider Image</label><input type="file" name="slider_image" accept=".png,.jpg,.jpeg,.webp" required></div>
     <div><label>Sort Order</label><input type="number" name="sort_order" value="0"></div>
@@ -235,6 +241,7 @@ require __DIR__ . '/partials/layout_head.php';
             <td><?= htmlspecialchars((string)$s['created_at']) ?></td>
             <td>
               <form method="post" onsubmit="return confirm('Delete this slider image?')">
+      <?= csrfField() ?>
                 <input type="hidden" name="action" value="delete_slider">
                 <input type="hidden" name="slider_id" value="<?= (int)$s['id'] ?>">
                 <button class="btn btn-delete" type="submit">Delete</button>

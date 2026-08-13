@@ -1,0 +1,29 @@
+# Files this release retires from the server.
+#
+# The updater only adds and overwrites files, so anything deleted from
+# the repository would otherwise stay live on production. List those
+# paths here and the deploy step removes them.
+#
+# Rules enforced by GitHubUpdateService::applyRemovalManifest():
+#   - files only, one repo-relative path per line
+#   - must live under app/ public/ cron/ tools/ database/
+#   - protected paths (.env, config.php, uploads/, storage/) are refused
+#   - no "..", no absolute paths, must resolve inside the project
+#   - already-missing entries are skipped, so this file is idempotent
+#
+# Keep entries here permanently: a server that skips a release must still
+# get the removal when it eventually updates.
+
+# --- v1.4.0 (Phase 1 hardening) -------------------------------------
+# Dead stubs that returned a fixed "disabled" JSON without authentication.
+public/client_models.php
+public/client_test_api.php
+public/dashboard_refill.php
+
+# Called DashboardController::regenerateQrAjax(), which does not exist:
+# every request was an unauthenticated fatal error.
+public/dashboard_regenerate_qr.php
+
+# Production database dump committed by mistake. Contained customer PII,
+# password hashes and live API keys.
+database/Database.sql

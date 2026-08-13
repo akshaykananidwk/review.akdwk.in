@@ -11,6 +11,8 @@ require_once __DIR__ . '/../services/AiReviewService.php';
 require_once __DIR__ . '/../services/StandeeComposerService.php';
 require_once __DIR__ . '/../services/WalletService.php';
 require_once __DIR__ . '/../services/WhatsAppService.php';
+require_once __DIR__ . '/../helpers/rate_limit_helper.php';
+require_once __DIR__ . '/../services/Logger.php';
 
 final class ClientController
 {
@@ -40,6 +42,23 @@ final class ClientController
     {
         header('Content-Type: application/json');
         $pdo = getPDO();
+
+        // Registration grants signup bonus credits and free platform
+        // validity, so an unthrottled endpoint is a direct cost and
+        // fraud vector. Cap per IP over a long window.
+        $ipGate = rateLimitHit('register:ip', rateLimitClientIp(), 5, 3600);
+        if (!$ipGate['allowed']) {
+            Logger::security('Registration blocked by rate limit', [
+                'hits' => $ipGate['hits'],
+                'email' => isset($_POST['email']) ? substr((string)$_POST['email'], 0, 190) : null,
+            ]);
+            http_response_code(429);
+            echo json_encode([
+                'ok' => false,
+                'errors' => ['Too many registration attempts from this network. Please try again later.'],
+            ]);
+            return;
+        }
 
         $businessName = trim($_POST['business_name'] ?? '');
         $ownerName = trim($_POST['owner_name'] ?? '');

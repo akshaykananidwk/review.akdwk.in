@@ -7,7 +7,18 @@ require_once __DIR__ . '/../helpers/csrf_helper.php';
 require_once __DIR__ . '/../helpers/settings_helper.php';
 require_once __DIR__ . '/../services/AiReviewService.php';
 require_once __DIR__ . '/../helpers/subscription_helper.php';
+require_once __DIR__ . '/../helpers/rate_limit_helper.php';
 require_once __DIR__ . '/../services/WalletService.php';
+require_once __DIR__ . '/../services/Logger.php';
+
+/**
+ * Raised when a review cannot be billed because the client's wallet
+ * cannot cover it. Distinct from a technical failure so the customer
+ * sees a polite message instead of an error reference.
+ */
+final class InsufficientCreditsException extends RuntimeException
+{
+}
 
 final class PublicReviewController
 {
@@ -20,6 +31,24 @@ final class PublicReviewController
         }
 
         $ip = $this->getIpAddress() ?? '0.0.0.0';
+
+        // Session creation is an unauthenticated write. Cap it per IP and
+        // per QR token so a script cannot flood review_sessions or force
+        // buffer/AI consumption downstream.
+        // Tuning note: customers at a busy venue often share one WiFi/NAT
+        // address, so per-IP caps are deliberately generous; the tight
+        // control is per-session (a session can only ever bill once).
+        $ipGate = rateLimitHit('review_page:ip', $ip, 150, 600);
+        $qrGate = rateLimitHit('review_page:qr', $token, 300, 600);
+        if (!$ipGate['allowed'] || !$qrGate['allowed']) {
+            Logger::security('Review page rate limit hit', [
+                'ip_hits' => $ipGate['hits'],
+                'qr_hits' => $qrGate['hits'],
+            ]);
+            http_response_code(429);
+            header('Retry-After: ' . max(1, (int)max($ipGate['retry_after'], $qrGate['retry_after'])));
+            exit('Too many requests. Please wait a moment and scan again.');
+        }
 
         $pdo = getPDO();
         $s = $pdo->prepare("
@@ -78,6 +107,10 @@ final class PublicReviewController
             return;
         }
 
+        if (!$this->enforcePublicRateLimit('review_rate', $sessionUuid, 12, 300)) {
+            return;
+        }
+
         $s = $pdo->prepare("SELECT id FROM review_sessions WHERE session_uuid = :u LIMIT 1");
         $s->execute([':u' => $sessionUuid]);
         $session = $s->fetch();
@@ -131,6 +164,22 @@ final class PublicReviewController
         echo json_encode(['ok' => true, 'message' => 'Thank you for your feedback.']);
     }
 
+    /**
+     * Deliver the AI review for a 5-star session.
+     * -------------------------------------------------------------------
+     * REVENUE-CRITICAL. Allocation and billing happen here, atomically,
+     * at the moment the review text is handed to the customer — not on a
+     * later client-controlled callback. The client never supplies a
+     * review id, so review-id tampering is structurally impossible.
+     *
+     * Idempotent: a session that already holds an allocated review gets
+     * the same text back and is never billed twice (page refresh,
+     * double-tap, retry after a dropped connection).
+     *
+     * When the buffer is empty the customer is NOT dead-ended: they are
+     * still sent to Google to write in their own words, nothing is
+     * billed, and a background refill is queued.
+     */
     public function getPositiveReviewAjax(): void
     {
         header('Content-Type: application/json');
@@ -141,8 +190,12 @@ final class PublicReviewController
             return;
         }
 
+        if (!$this->enforcePublicRateLimit('review_fetch', $sessionUuid, 6, 250)) {
+            return;
+        }
+
         $ss = $pdo->prepare("
-            SELECT rs.id, rs.client_id, rs.customer_rating, c.google_place_id
+            SELECT rs.id, rs.client_id, rs.customer_rating, rs.used_pre_generated_review_id, c.google_place_id
             FROM review_sessions rs
             INNER JOIN clients c ON c.id = rs.client_id
             WHERE rs.session_uuid = :u
@@ -155,92 +208,260 @@ final class PublicReviewController
             return;
         }
 
-        $ai = new AiReviewService($pdo);
-        $pricePerReview = $this->getPricePerReview($pdo);
-        $walletBalance = $this->getWalletBalance($pdo, (int)$session['client_id']);
-        if ($walletBalance < $pricePerReview) {
+        $googleUrl = 'https://search.google.com/local/writereview?placeid='
+            . urlencode((string)$session['google_place_id']);
+
+        // Re-check validity here, not only on page load: a session opened
+        // before expiry must not keep spending the wallet afterwards.
+        if (!clientHasActiveSubscription($pdo, (int)$session['client_id'])) {
             echo json_encode([
                 'ok' => false,
-                'message' => 'Review system currently unavailable.',
+                'code' => 'inactive',
+                'message' => 'Thank you for visiting! Review collection is paused for this business.',
             ]);
             return;
         }
 
-        $review = $this->peekOneUnusedReview($pdo, (int)$session['client_id']);
-
-        // Keep the pre-generated buffer full proactively.
-        if ($review === null) {
-            try {
-                $ai->fillBufferToTarget((int)$session['client_id'], AiReviewService::BUFFER_TARGET);
-            } catch (Throwable) {
-                // ignore and try direct one-shot generation below
-            }
-            $review = $this->peekOneUnusedReview($pdo, (int)$session['client_id']);
-        }
-
-        // Same request hard fallback: generate one review and store as unused.
-        if ($review === null) {
-            try {
-                $generated = $ai->generateAndStoreOneUnusedReview((int)$session['client_id']);
-                if ($generated !== null) {
-                    $review = $generated;
-                }
-            } catch (Throwable) {
-                // final error handled below
-            }
-        }
-
-        if ($review === null) {
-            $liveText = $ai->generateRealtimeReviewForClient((int)$session['client_id']);
-            if ($liveText === null || trim($liveText) === '') {
-                $diag = $ai->diagnoseClientApi((int)$session['client_id']);
-                $status = (int)($diag['http_status'] ?? 0);
-                $err = trim((string)($diag['error'] ?? ''));
-                $curlErr = trim((string)($diag['curl_error'] ?? ''));
-                $parts = [];
-                if ($status > 0) {
-                    $parts[] = 'HTTP ' . $status;
-                }
-                if ($err !== '') {
-                    $parts[] = $err;
-                }
-                if ($curlErr !== '') {
-                    $parts[] = 'cURL: ' . $curlErr;
-                }
-                $diagMessage = empty($parts) ? 'Unknown gateway error' : implode(' | ', $parts);
+        // Already allocated for this session — replay the same text, free.
+        $existingId = (int)($session['used_pre_generated_review_id'] ?? 0);
+        if ($existingId > 0) {
+            $existing = $pdo->prepare('SELECT review_text FROM pre_generated_reviews WHERE id = :id LIMIT 1');
+            $existing->execute([':id' => $existingId]);
+            $text = (string)($existing->fetchColumn() ?: '');
+            if ($text !== '') {
                 echo json_encode([
-                    'ok' => false,
-                    'message' => 'API error: review generation failed. ' . $diagMessage,
+                    'ok' => true,
+                    'review_text' => $text,
+                    'google_review_url' => $googleUrl,
+                    'billed' => false,
                 ]);
                 return;
             }
+        }
+
+        try {
+            $allocated = $this->allocateAndBillReview($pdo, (int)$session['id'], (int)$session['client_id']);
+        } catch (InsufficientCreditsException) {
+            echo json_encode([
+                'ok' => false,
+                'code' => 'insufficient_credits',
+                'message' => 'This business has paused review collection. Thank you for visiting!',
+            ]);
+            return;
+        } catch (Throwable $e) {
+            $ref = Logger::error(Logger::CH_WALLET, 'Review allocation failed', [
+                'session_id' => (int)$session['id'],
+                'client_id' => (int)$session['client_id'],
+            ], $e);
+            echo json_encode([
+                'ok' => false,
+                'message' => 'Something went wrong. Reference: ' . $ref,
+                'reference' => $ref,
+            ]);
+            return;
+        }
+
+        if ($allocated === null) {
+            // Buffer empty. Graceful path: still send them to Google, do
+            // not bill, and ask the background worker to refill.
+            $this->queueBufferRefill($pdo, (int)$session['client_id']);
+            Logger::warning(Logger::CH_AI, 'Review buffer empty at customer request', [
+                'client_id' => (int)$session['client_id'],
+                'session_id' => (int)$session['id'],
+            ]);
             echo json_encode([
                 'ok' => true,
-                'review_id' => 0,
-                'review_text' => $liveText,
-                'google_review_url' => 'https://search.google.com/local/writereview?placeid=' . urlencode($session['google_place_id']),
+                'fallback' => true,
+                'review_text' => '',
+                'google_review_url' => $googleUrl,
+                'message' => 'Please share your experience in your own words on Google.',
+                'billed' => false,
             ]);
             return;
         }
 
         echo json_encode([
             'ok' => true,
-            'review_id' => (int)$review['id'],
-            'review_text' => $review['review_text'],
-            'google_review_url' => 'https://search.google.com/local/writereview?placeid=' . urlencode($session['google_place_id']),
+            'review_text' => $allocated['review_text'],
+            'google_review_url' => $googleUrl,
+            'billed' => true,
         ]);
     }
 
+    /**
+     * Reserve one unused review for this session and debit the wallet in
+     * a single transaction. Returns null when the buffer is empty.
+     *
+     * @throws InsufficientCreditsException when the client cannot pay
+     * @return array{id:int,review_text:string}|null
+     */
+    private function allocateAndBillReview(PDO $pdo, int $sessionId, int $clientId): ?array
+    {
+        $pricePerReview = $this->getPricePerReview($pdo);
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            // Serialize concurrent calls for the SAME session so a
+            // double-tap cannot allocate (and bill) twice.
+            $lock = $pdo->prepare('SELECT used_pre_generated_review_id FROM review_sessions WHERE id = :id FOR UPDATE');
+            $lock->execute([':id' => $sessionId]);
+            $lockedRow = $lock->fetch();
+            $alreadyAllocated = (int)($lockedRow['used_pre_generated_review_id'] ?? 0);
+            if ($alreadyAllocated > 0) {
+                $again = $pdo->prepare('SELECT id, review_text FROM pre_generated_reviews WHERE id = :id LIMIT 1');
+                $again->execute([':id' => $alreadyAllocated]);
+                $row = $again->fetch();
+                if ($ownsTransaction) {
+                    $pdo->commit();
+                }
+                return $row ? ['id' => (int)$row['id'], 'review_text' => (string)$row['review_text']] : null;
+            }
+
+            $review = $this->lockOneUnusedReview($pdo, $clientId);
+            if ($review === null) {
+                if ($ownsTransaction) {
+                    $pdo->commit();
+                }
+                return null;
+            }
+
+            // WalletService::debit() returns null for BOTH an insufficient
+            // balance and an internal error. Read the balance under the same
+            // transaction first so the customer gets the right message and a
+            // real fault still produces an error reference.
+            $balanceStmt = $pdo->prepare('SELECT wallet_balance FROM clients WHERE id = :id LIMIT 1');
+            $balanceStmt->execute([':id' => $clientId]);
+            $currentBalance = (int)($balanceStmt->fetchColumn() ?: 0);
+            if ($currentBalance < $pricePerReview) {
+                if ($ownsTransaction) {
+                    $pdo->rollBack();
+                }
+                throw new InsufficientCreditsException('Wallet balance is below the price per review.');
+            }
+
+            $wallet = new WalletService($pdo);
+            $newBalance = $wallet->debit(
+                $clientId,
+                $pricePerReview,
+                WalletService::SOURCE_REVIEW_DEDUCT,
+                'Review delivered to customer (5-star flow)',
+                $sessionId
+            );
+            if ($newBalance === null) {
+                if ($ownsTransaction) {
+                    $pdo->rollBack();
+                }
+                // Balance was sufficient a moment ago, so this is a fault,
+                // not a business rejection.
+                throw new RuntimeException('Wallet debit failed despite sufficient balance.');
+            }
+
+            $pdo->prepare("
+                UPDATE pre_generated_reviews
+                SET status = 'used', used_in_session_id = :session_id, used_at = NOW()
+                WHERE id = :id
+            ")->execute([':session_id' => $sessionId, ':id' => (int)$review['id']]);
+
+            $pdo->prepare("
+                UPDATE review_sessions
+                SET used_pre_generated_review_id = :review_id
+                WHERE id = :id
+            ")->execute([':review_id' => (int)$review['id'], ':id' => $sessionId]);
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+
+            Logger::info(Logger::CH_WALLET, 'Review allocated and billed', [
+                'client_id' => $clientId,
+                'session_id' => $sessionId,
+                'review_id' => (int)$review['id'],
+                'charged' => $pricePerReview,
+                'balance_after' => $newBalance,
+            ]);
+
+            $this->queueBufferRefill($pdo, $clientId);
+
+            return ['id' => (int)$review['id'], 'review_text' => (string)$review['review_text']];
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Take one unused review with a row lock so two customers of the
+     * same business are never handed identical text. SKIP LOCKED lets
+     * concurrent sessions pick different rows instead of queueing;
+     * falls back to a plain lock on engines that lack it.
+     *
+     * @return array{id:int,review_text:string}|null
+     */
+    private function lockOneUnusedReview(PDO $pdo, int $clientId): ?array
+    {
+        $sql = "
+            SELECT id, review_text
+            FROM pre_generated_reviews
+            WHERE client_id = :client_id AND status = 'unused'
+            ORDER BY id ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+        ";
+        try {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([':client_id' => $clientId]);
+        } catch (Throwable $e) {
+            // Older engines lack SKIP LOCKED. Fall back to a plain lock, but
+            // record why so this never degrades silently forever.
+            Logger::warning(Logger::CH_APP, 'SKIP LOCKED unavailable, using plain row lock', [
+                'client_id' => $clientId,
+            ], $e);
+            $stmt = $pdo->prepare(str_replace('FOR UPDATE SKIP LOCKED', 'FOR UPDATE', $sql));
+            $stmt->execute([':client_id' => $clientId]);
+        }
+        $row = $stmt->fetch();
+        if (!$row) {
+            return null;
+        }
+        return ['id' => (int)$row['id'], 'review_text' => (string)$row['review_text']];
+    }
+
+    /** Ask the background worker to top the buffer back up. Never throws. */
+    private function queueBufferRefill(PDO $pdo, int $clientId): void
+    {
+        try {
+            $pdo->prepare("
+                INSERT INTO ai_generation_jobs
+                    (client_id, trigger_source, status, requested_count, generated_count, attempt_count, created_at)
+                VALUES (:client_id, 'review_consumed', 'queued', 1, 0, 0, NOW())
+            ")->execute([':client_id' => $clientId]);
+        } catch (Throwable $e) {
+            Logger::warning(Logger::CH_AI, 'Could not queue buffer refill', ['client_id' => $clientId], $e);
+        }
+    }
+
+    /**
+     * Completion tracking only — billing already happened at allocation.
+     * Carries no financial effect, so it cannot be abused for credit.
+     * Idempotent: re-posting simply returns the Google URL again.
+     */
     public function markReviewUsedAjax(): void
     {
         header('Content-Type: application/json');
         $pdo = getPDO();
         $sessionUuid = trim($_POST['session_uuid'] ?? '');
-        $reviewId = (int)($_POST['review_id'] ?? 0);
-        $reviewText = trim((string)($_POST['review_text'] ?? ''));
 
         if ($sessionUuid === '') {
             echo json_encode(['ok' => false, 'message' => 'Invalid usage payload.']);
+            return;
+        }
+
+        if (!$this->enforcePublicRateLimit('review_complete', $sessionUuid, 10, 300)) {
             return;
         }
 
@@ -258,152 +479,68 @@ final class PublicReviewController
             return;
         }
 
-        $ai = new AiReviewService($pdo);
-
         try {
-            $pdo->beginTransaction();
-
-            // Idempotent behavior if already marked for this session.
-            $already = $pdo->prepare("SELECT used_pre_generated_review_id FROM review_sessions WHERE id = :id LIMIT 1");
-            $already->execute([':id' => (int)$session['id']]);
-            $alreadyRow = $already->fetch();
-            if ($alreadyRow && (int)($alreadyRow['used_pre_generated_review_id'] ?? 0) === $reviewId) {
-                $pdo->commit();
-                echo json_encode([
-                    'ok' => true,
-                    'used' => true,
-                    'google_review_url' => 'https://search.google.com/local/writereview?placeid=' . urlencode($session['google_place_id']),
-                ]);
-                return;
-            }
-
-            if ($reviewId > 0) {
-                $pick = $pdo->prepare("
-                    SELECT id
-                    FROM pre_generated_reviews
-                    WHERE id = :review_id AND client_id = :client_id AND status = 'unused'
-                    LIMIT 1
-                    FOR UPDATE
-                ");
-                $pick->execute([
-                    ':review_id' => $reviewId,
-                    ':client_id' => (int)$session['client_id']
-                ]);
-                $row = $pick->fetch();
-                if (!$row) {
-                    $pdo->rollBack();
-                    echo json_encode(['ok' => false, 'message' => 'Review is no longer available.']);
-                    return;
-                }
-
-                $pdo->prepare("
-                    UPDATE pre_generated_reviews
-                    SET status = 'used', used_in_session_id = :session_id, used_at = NOW()
-                    WHERE id = :id
-                ")->execute([
-                    ':session_id' => (int)$session['id'],
-                    ':id' => $reviewId
-                ]);
-            } else {
-                if ($reviewText === '') {
-                    $pdo->rollBack();
-                    echo json_encode(['ok' => false, 'message' => 'Missing review text.']);
-                    return;
-                }
-                $reviewHash = hash('sha256', strtolower(trim((string)preg_replace('/\s+/', ' ', $reviewText))));
-                try {
-                    $ins = $pdo->prepare("
-                        INSERT INTO pre_generated_reviews (client_id, review_text, review_hash, status, generated_by, used_in_session_id, generated_at, used_at)
-                        VALUES (:client_id, :review_text, :review_hash, 'used', 'ai', :session_id, NOW(), NOW())
-                    ");
-                    $ins->execute([
-                        ':client_id' => (int)$session['client_id'],
-                        ':review_text' => $reviewText,
-                        ':review_hash' => $reviewHash,
-                        ':session_id' => (int)$session['id'],
-                    ]);
-                    $reviewId = (int)$pdo->lastInsertId();
-                } catch (Throwable) {
-                    $existing = $pdo->prepare("
-                        SELECT id, status
-                        FROM pre_generated_reviews
-                        WHERE client_id = :client_id AND review_hash = :review_hash
-                        LIMIT 1
-                        FOR UPDATE
-                    ");
-                    $existing->execute([
-                        ':client_id' => (int)$session['client_id'],
-                        ':review_hash' => $reviewHash
-                    ]);
-                    $ex = $existing->fetch();
-                    if (!$ex) {
-                        $pdo->rollBack();
-                        echo json_encode(['ok' => false, 'message' => 'Could not persist review usage.']);
-                        return;
-                    }
-                    $reviewId = (int)$ex['id'];
-                    if ((string)$ex['status'] === 'unused') {
-                        $pdo->prepare("
-                            UPDATE pre_generated_reviews
-                            SET status = 'used', used_in_session_id = :session_id, used_at = NOW()
-                            WHERE id = :id
-                        ")->execute([
-                            ':session_id' => (int)$session['id'],
-                            ':id' => $reviewId
-                        ]);
-                    }
-                }
-            }
-
-            $pricePerReview = $this->getPricePerReview($pdo);
-            $wallet = new WalletService($pdo);
-            $newBalance = $wallet->debit(
-                (int)$session['client_id'],
-                $pricePerReview,
-                WalletService::SOURCE_REVIEW_DEDUCT,
-                'Review consumed by customer (5-star flow)',
-                (int)$session['id']
-            );
-            if ($newBalance === null) {
-                $pdo->rollBack();
-                echo json_encode([
-                    'ok' => false,
-                    'message' => 'Review system currently unavailable.',
-                ]);
-                return;
-            }
-
             $pdo->prepare("
                 UPDATE review_sessions
-                SET used_pre_generated_review_id = :review_id,
-                    user_copied_review = 1,
+                SET user_copied_review = 1,
                     redirected_to_google = 1,
-                    completed_at = NOW()
+                    completed_at = COALESCE(completed_at, NOW())
                 WHERE id = :id
-            ")->execute([
-                ':review_id' => $reviewId,
-                ':id' => (int)$session['id']
-            ]);
-
-            $pdo->prepare("
-                INSERT INTO ai_generation_jobs (client_id, trigger_source, status, requested_count, generated_count, attempt_count, created_at)
-                VALUES (:client_id, 'review_consumed', 'queued', 1, 0, 0, NOW())
-            ")->execute([':client_id' => (int)$session['client_id']]);
-
-            $pdo->commit();
-            echo json_encode([
-                'ok' => true,
-                'used' => true,
-                'google_review_url' => 'https://search.google.com/local/writereview?placeid=' . urlencode($session['google_place_id']),
-            ]);
-        } catch (Throwable) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            echo json_encode(['ok' => false, 'message' => 'Could not mark review as used.']);
+            ")->execute([':id' => (int)$session['id']]);
+        } catch (Throwable $e) {
+            Logger::warning(Logger::CH_APP, 'Could not record review completion', [
+                'session_id' => (int)$session['id'],
+            ], $e);
         }
+
+        echo json_encode([
+            'ok' => true,
+            'used' => true,
+            'google_review_url' => 'https://search.google.com/local/writereview?placeid='
+                . urlencode((string)$session['google_place_id']),
+        ]);
     }
 
+    /**
+     * Shared limiter for the anonymous review endpoints: caps both the
+     * individual session and the source IP, so neither a scripted single
+     * session nor a spread of sessions from one host can drain a wallet
+     * or burn AI quota. Emits the JSON refusal itself.
+     */
+    private function enforcePublicRateLimit(string $action, string $sessionUuid, int $perSession, int $perIp): bool
+    {
+        $window = 600; // 10 minutes
+
+        $bySession = rateLimitHit($action . ':session', $sessionUuid, $perSession, $window);
+        if (!$bySession['allowed']) {
+            Logger::security('Public review endpoint rate limit hit (session)', [
+                'action' => $action,
+                'hits' => $bySession['hits'],
+            ]);
+            echo json_encode([
+                'ok' => false,
+                'code' => 'rate_limited',
+                'message' => 'Too many attempts. Please wait a moment and try again.',
+            ]);
+            return false;
+        }
+
+        $byIp = rateLimitHit($action . ':ip', rateLimitClientIp(), $perIp, $window);
+        if (!$byIp['allowed']) {
+            Logger::security('Public review endpoint rate limit hit (ip)', [
+                'action' => $action,
+                'hits' => $byIp['hits'],
+            ]);
+            echo json_encode([
+                'ok' => false,
+                'code' => 'rate_limited',
+                'message' => 'Too many attempts from this network. Please try again shortly.',
+            ]);
+            return false;
+        }
+
+        return true;
+    }
     private function getIpAddress(): ?string
     {
         return $_SERVER['REMOTE_ADDR'] ?? null;
@@ -426,30 +563,7 @@ final class PublicReviewController
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
     }
 
-    private function peekOneUnusedReview(PDO $pdo, int $clientId): ?array
-    {
-        $pick = $pdo->prepare("
-            SELECT id, review_text
-            FROM pre_generated_reviews
-            WHERE client_id = :client_id AND status = 'unused'
-            ORDER BY id ASC
-            LIMIT 1
-        ");
-        $pick->execute([':client_id' => $clientId]);
-        $review = $pick->fetch();
-        return $review ?: null;
-    }
 
-    private function getWalletBalance(PDO $pdo, int $clientId): int
-    {
-        try {
-            $stmt = $pdo->prepare("SELECT wallet_balance FROM clients WHERE id = :id LIMIT 1");
-            $stmt->execute([':id' => $clientId]);
-            return (int)($stmt->fetch()['wallet_balance'] ?? 0);
-        } catch (Throwable) {
-            return 0;
-        }
-    }
 
     private function getPricePerReview(PDO $pdo): int
     {

@@ -88,7 +88,7 @@
 
 <script>
 const sessionUuid=<?= json_encode($sessionUuid) ?>,csrfToken=<?= json_encode($csrfToken) ?>,fallbackGoogleUrl=<?= json_encode($googleReviewUrl) ?>;
-let selectedRating=0,googleUrl=fallbackGoogleUrl,currentReviewId=0,reviewUsed=false;
+let selectedRating=0,googleUrl=fallbackGoogleUrl,reviewUsed=false,writeYourOwn=false;
 const q=(s)=>document.querySelector(s),qa=(s)=>document.querySelectorAll(s);
 const fbBox=q('#feedbackBox'),posBox=q('#positiveBox'),ok=q('#ok'),err=q('#err');
 function showOk(m){ok.textContent=m;ok.style.display='block';err.style.display='none';}
@@ -114,10 +114,20 @@ qa('.star').forEach(btn=>btn.addEventListener('click',async()=>{
     posBox.classList.add('show');fbBox.classList.remove('show');q('#reviewText').textContent='Preparing your review...';
     const p=await post({action:'get_positive_review',session_uuid:sessionUuid});
     if(!p.ok){q('#reviewText').textContent='';showErr(p.message||'No review ready');return;}
-    q('#reviewText').textContent=p.review_text;googleUrl=p.google_review_url;currentReviewId=Number(p.review_id||0);reviewUsed=false;
-    q('#copyPostBtn').textContent='Copy & Post on Google';
-    q('#copyPostBtn').disabled=false;
-    showOk('Review text is ready.');
+    googleUrl=p.google_review_url;reviewUsed=false;writeYourOwn=!!p.fallback;
+    if(writeYourOwn){
+      // Buffer empty — never dead-end the customer. Send them to Google
+      // to write in their own words.
+      q('#reviewText').textContent=p.message||'Please share your experience in your own words on Google.';
+      q('#copyPostBtn').textContent='Continue to Google';
+      q('#copyPostBtn').disabled=false;
+      showOk('Thank you! Continue to Google to post your review.');
+    }else{
+      q('#reviewText').textContent=p.review_text;
+      q('#copyPostBtn').textContent='Copy & Post on Google';
+      q('#copyPostBtn').disabled=false;
+      showOk('Review text is ready.');
+    }
   }catch(e){
     q('#reviewText').textContent='';
     showErr((e&&e.message)?e.message:'Unable to load review. Please try again.');
@@ -135,19 +145,27 @@ q('#submitFeedbackBtn').addEventListener('click',async()=>{
   }
 });
 
-q('#copyPostBtn').addEventListener('click',async()=>{const t=q('#reviewText').textContent.trim(); if(!t){showErr('Review text not ready.');return;}
-  if(currentReviewId<=0){showErr('Review reference missing. Please select rating again.');return;}
-  if(reviewUsed){showOk('Review Used');setTimeout(()=>location.href=googleUrl,300);return;}
+q('#copyPostBtn').addEventListener('click',async()=>{
+  const t=q('#reviewText').textContent.trim();
+  if(reviewUsed){setTimeout(()=>location.href=googleUrl,200);return;}
   try{
-    const mark=await post({action:'mark_review_used',session_uuid:sessionUuid,review_id:currentReviewId,review_text:t});
-    if(!mark.ok){showErr(mark.message||'Could not mark review used.');return;}
-    try{await navigator.clipboard.writeText(t);}catch{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);}
+    // Completion tracking only — the review was already allocated and
+    // billed server-side when the text was delivered.
+    await post({action:'mark_review_used',session_uuid:sessionUuid});
+    if(!writeYourOwn && t){
+      try{await navigator.clipboard.writeText(t);}
+      catch{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);}
+    }
     reviewUsed=true;
-    q('#copyPostBtn').textContent='Review Used';
+    q('#copyPostBtn').textContent=writeYourOwn?'Opening Google…':'Review Used';
     q('#copyPostBtn').disabled=true;
-    showOk('Copied. Redirecting to Google...'); setTimeout(()=>location.href=googleUrl,500);
+    showOk(writeYourOwn?'Redirecting to Google...':'Copied. Redirecting to Google...');
+    setTimeout(()=>location.href=googleUrl,500);
   }catch(e){
-    showErr((e&&e.message)?e.message:'Could not complete review action.');
+    // Never strand the customer: tracking is best-effort, the redirect
+    // is the thing that matters.
+    reviewUsed=true;
+    setTimeout(()=>location.href=googleUrl,300);
   }
 });
 </script>

@@ -18,6 +18,7 @@ require __DIR__ . '/partials/layout_head.php';
 <div class="card">
   <h3 style="margin:0 0 10px;color:var(--peacock)">Edit Business</h3>
   <form method="post">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="update_client">
     <div class="edit-grid">
       <div><label>Business</label><select id="edit_client_id" name="client_id" required><option value="">Select Business</option><?php foreach($clients as $c): ?><option value="<?= (int)$c['id'] ?>"><?= htmlspecialchars($c['business_name']) ?> (<?= htmlspecialchars($c['email']) ?>)</option><?php endforeach; ?></select></div>
@@ -102,24 +103,28 @@ require __DIR__ . '/partials/layout_head.php';
                 <a class="btn btn-ghost" href="<?= APP_URL ?>/admin_wallet.php?client_id=<?= (int)$c['id'] ?>">Wallet</a>
 
                 <form method="post" style="display:inline" onsubmit="return confirm('Clear unused AI pre-generated reviews for this business and generate a fresh buffer of <?= (int)\AiReviewService::BUFFER_TARGET ?>? Used reviews stay on record.')">
+      <?= csrfField() ?>
                   <input type="hidden" name="action" value="flush_ai_buffer">
                   <input type="hidden" name="client_id" value="<?= (int)$c['id'] ?>">
                   <button class="btn btn-edit" type="submit" title="Remove stale unused reviews and refill the AI buffer">Flush &amp; regenerate</button>
                 </form>
 
                 <form method="post">
+      <?= csrfField() ?>
                   <input type="hidden" name="action" value="impersonate_client">
                   <input type="hidden" name="client_id" value="<?= (int)$c['id'] ?>">
                   <button class="btn btn-primary" type="submit">Login as Client</button>
                 </form>
 
                 <form method="post" onsubmit="return confirm('Change business active/suspended status?')">
+      <?= csrfField() ?>
                   <input type="hidden" name="action" value="toggle_client">
                   <input type="hidden" name="client_id" value="<?= (int)$c['id'] ?>">
                   <button class="btn btn-toggle" type="submit"><?= (int)$c['is_active'] === 1 ? 'Suspend':'Activate' ?></button>
                 </form>
 
                 <form method="post" onsubmit="return confirm('Delete this business and all related data permanently?')">
+      <?= csrfField() ?>
                   <input type="hidden" name="action" value="delete_client">
                   <input type="hidden" name="client_id" value="<?= (int)$c['id'] ?>">
                   <button class="btn btn-delete" type="submit">Delete</button>

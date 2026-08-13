@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../helpers/session_helper.php';
+require_once __DIR__ . '/../services/Logger.php';
+require_once __DIR__ . '/../helpers/csrf_helper.php';
 require_once __DIR__ . '/../services/AiReviewService.php';
 
 final class ClientSettingsController
@@ -18,6 +20,8 @@ final class ClientSettingsController
         $demoReview = '';
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Reject forged cross-site submissions before any state changes.
+            csrfRequireValidToken();
             $action = (string)($_POST['action'] ?? '');
 
             if ($action === 'update_profile') {

@@ -5,6 +5,8 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../helpers/admin_session_helper.php';
 require_once __DIR__ . '/../helpers/audit_helper.php';
+require_once __DIR__ . '/../services/Logger.php';
+require_once __DIR__ . '/../helpers/csrf_helper.php';
 require_once __DIR__ . '/../helpers/settings_helper.php';
 require_once __DIR__ . '/../services/WhatsAppService.php';
 require_once __DIR__ . '/../services/WalletService.php';
@@ -37,6 +39,8 @@ final class SuperAdminController
         $flash = '';
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Reject forged cross-site submissions before any state changes.
+            csrfRequireValidToken();
             $action = (string)($_POST['action'] ?? '');
             $adminId = (int)$_SESSION['admin_id'];
 
@@ -287,6 +291,8 @@ final class SuperAdminController
         }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Reject forged cross-site submissions before any state changes.
+            csrfRequireValidToken();
             $action = (string)($_POST['action'] ?? '');
             $amount = (int)($_POST['amount'] ?? 0);
             $description = trim((string)($_POST['description'] ?? ''));
@@ -405,6 +411,8 @@ final class SuperAdminController
         $adminId = (int)$_SESSION['admin_id'];
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Reject forged cross-site submissions before any state changes.
+            csrfRequireValidToken();
             $action = (string)($_POST['action'] ?? '');
 
             if ($action === 'add_category') {
@@ -603,6 +611,8 @@ final class SuperAdminController
         $hasBoxColumns = $this->standeeTemplatesHasBoxColumns($pdo);
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Reject forged cross-site submissions before any state changes.
+            csrfRequireValidToken();
             $action = (string)($_POST['action'] ?? '');
 
             if ($action === 'upload_template') {
@@ -1037,6 +1047,8 @@ final class SuperAdminController
         $adminId = (int)$_SESSION['admin_id'];
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Reject forged cross-site submissions before any state changes.
+            csrfRequireValidToken();
             $action = (string)($_POST['action'] ?? '');
             if ($action === 'save_global_settings') {
                 $systemName = trim((string)($_POST['system_name'] ?? 'Krishna Review System'));
@@ -1303,6 +1315,8 @@ final class SuperAdminController
         $adminId = (int)$_SESSION['admin_id'];
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Reject forged cross-site submissions before any state changes.
+            csrfRequireValidToken();
             $action = (string)($_POST['action'] ?? '');
 
             if ($action === 'create_plan' || $action === 'update_plan') {
@@ -1443,6 +1457,8 @@ final class SuperAdminController
         require_once __DIR__ . '/../services/ResellerWalletService.php';
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Reject forged cross-site submissions before any state changes.
+            csrfRequireValidToken();
             $action = (string)($_POST['action'] ?? '');
             if ($action === 'credit_reseller') {
                 $rid = (int)($_POST['reseller_admin_id'] ?? 0);
@@ -1486,6 +1502,8 @@ final class SuperAdminController
         $adminId = (int)$_SESSION['admin_id'];
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Reject forged cross-site submissions before any state changes.
+            csrfRequireValidToken();
             $name = trim((string)($_POST['full_name'] ?? ''));
             $email = trim((string)($_POST['email'] ?? ''));
             $password = (string)($_POST['password'] ?? '');

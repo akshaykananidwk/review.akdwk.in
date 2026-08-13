@@ -47,6 +47,7 @@ require __DIR__ . '/partials/layout_head.php';
     <h3 style="margin:0 0 8px;color:#005f8f">Admin Recharge (offline / friend)</h3>
     <p class="small" style="margin:0 0 10px">Add credits without Razorpay — e.g. ₹500 for a friend. Client gets WhatsApp: amount credited + new balance + valid until date.</p>
     <form method="post" style="display:grid;gap:8px" id="topupForm">
+      <?= csrfField() ?>
       <input type="hidden" name="client_id" value="<?= (int)$client['id'] ?>">
       <input type="hidden" name="action" value="admin_topup">
       <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr">
@@ -78,6 +79,7 @@ require __DIR__ . '/partials/layout_head.php';
 <div class="card">
   <h3 style="margin:0 0 8px;color:#005f8f">Deduct credits</h3>
   <form method="post" style="display:grid;gap:8px;max-width:480px">
+      <?= csrfField() ?>
     <input type="hidden" name="client_id" value="<?= (int)$client['id'] ?>">
     <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr">
       <div><label>Amount</label><input type="number" name="amount" min="1" step="1" required></div>

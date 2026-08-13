@@ -30,6 +30,7 @@ require __DIR__ . '/partials/layout_head.php';
   </p>
   <div class="upload-zone">
     <form method="post" enctype="multipart/form-data">
+      <?= csrfField() ?>
       <input type="hidden" name="action" value="upload_template">
       <div style="display:grid;gap:10px;grid-template-columns:1fr;max-width:520px">
         <div><label>Optional title</label><input type="text" name="title" placeholder="e.g. Diwali Gold Frame"></div>
@@ -90,11 +91,13 @@ require __DIR__ . '/partials/layout_head.php';
             <div class="tpl-actions">
               <a class="btn btn-primary" href="<?= htmlspecialchars($editUrl) ?>" style="padding:6px 10px;font-size:.85rem">Edit Position</a>
               <form method="post" style="display:inline">
+      <?= csrfField() ?>
                 <input type="hidden" name="action" value="toggle_template">
                 <input type="hidden" name="template_id" value="<?= $tplId ?>">
                 <button type="submit" class="btn btn-toggle" style="padding:6px 10px;font-size:.85rem"><?= $isActive ? 'Hide' : 'Show' ?></button>
               </form>
               <form method="post" style="display:inline" onsubmit="return confirm('Remove this template permanently?');">
+      <?= csrfField() ?>
                 <input type="hidden" name="action" value="delete_template">
                 <input type="hidden" name="template_id" value="<?= $tplId ?>">
                 <button type="submit" class="btn btn-delete" style="padding:6px 10px;font-size:.85rem">Delete</button>

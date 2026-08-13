@@ -17,6 +17,7 @@ require __DIR__ . '/partials/layout_head.php';
 <div class="card">
   <h3 style="margin:0 0 10px;color:var(--peacock)">Add New Category</h3>
   <form method="post" class="grid">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="add_category">
     <div style="grid-column:span 3"><label>Category Name</label><input name="category_name" required placeholder="e.g. Cafe, Clinic, Tuition Center"></div>
     <div style="display:flex;align-items:end"><button class="btn" type="submit">Add Category</button></div>
@@ -36,6 +37,7 @@ require __DIR__ . '/partials/layout_head.php';
           <td><?= (int)$cat['id'] ?></td>
           <td>
             <form method="post" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <?= csrfField() ?>
               <input type="hidden" name="action" value="update_category">
               <input type="hidden" name="category_id" value="<?= (int)$cat['id'] ?>">
               <input name="category_name" value="<?= htmlspecialchars($cat['category_name']) ?>" required style="max-width:280px">
@@ -51,6 +53,7 @@ require __DIR__ . '/partials/layout_head.php';
           <td>
             <div class="row-actions">
               <form method="post" onsubmit="return confirm('Delete category &quot;<?= htmlspecialchars(addslashes($cat['category_name']), ENT_QUOTES) ?>&quot;? This cannot be undone.');">
+      <?= csrfField() ?>
                 <input type="hidden" name="action" value="delete_category">
                 <input type="hidden" name="category_id" value="<?= (int)$cat['id'] ?>">
                 <button class="btn btn-delete" type="submit" title="Delete category">&#x1F5D1; Delete</button>
@@ -68,6 +71,7 @@ require __DIR__ . '/partials/layout_head.php';
 <div class="card">
   <h3 style="margin:0 0 10px;color:var(--peacock)">Add New Facility</h3>
   <form method="post">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="add_facility">
     <div class="grid">
       <div style="grid-column:span 2">
@@ -99,6 +103,7 @@ require __DIR__ . '/partials/layout_head.php';
       <?php else: foreach ($facilities as $f): ?>
         <tr>
           <form method="post">
+      <?= csrfField() ?>
             <input type="hidden" name="action" value="update_facility">
             <input type="hidden" name="facility_id" value="<?= (int)$f['id'] ?>">
             <td><?= (int)$f['id'] ?></td>
@@ -122,6 +127,7 @@ require __DIR__ . '/partials/layout_head.php';
           </form>
           <td>
             <form method="post" onsubmit="return confirm('Delete facility &quot;<?= htmlspecialchars(addslashes($f['facility_name']), ENT_QUOTES) ?>&quot;? This cannot be undone.');">
+      <?= csrfField() ?>
               <input type="hidden" name="action" value="delete_facility">
               <input type="hidden" name="facility_id" value="<?= (int)$f['id'] ?>">
               <button class="btn btn-delete" type="submit" title="Delete facility">&#x1F5D1; Delete</button>

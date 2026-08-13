@@ -313,8 +313,11 @@ final class AiReviewService
             CURLOPT_POSTFIELDS => $payload,
             CURLOPT_TIMEOUT => 8,
             CURLOPT_CONNECTTIMEOUT => 4,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => 0,
+            // Certificate verification is mandatory: this request carries
+            // the Gemini API key in a header, and the response text is
+            // published publicly on Google under a real business name.
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
         ]);
 
         $response = curl_exec($ch);

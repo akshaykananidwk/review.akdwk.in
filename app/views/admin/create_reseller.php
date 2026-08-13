@@ -13,6 +13,7 @@ require __DIR__ . '/partials/layout_head.php';
     Creates an <strong>admins</strong> row with <code>role = reseller</code>. The reseller uses the same <a href="<?= APP_URL ?>/login.php">login page</a> as everyone else and is redirected to the reseller panel.
   </p>
   <form method="post">
+      <?= csrfField() ?>
     <div style="display:grid;gap:10px;max-width:420px">
       <div>
         <label>Full name *</label>

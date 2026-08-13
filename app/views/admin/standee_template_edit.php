@@ -101,6 +101,7 @@ if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bnColor)) {
 </div>
 
 <form method="post" id="boxForm">
+      <?= csrfField() ?>
   <input type="hidden" name="action" value="save_box">
   <input type="hidden" name="template_id" value="<?= $tplId ?>">
   <input type="hidden" name="qr_pos_x"  id="f_qx" value="<?= $qx ?>">

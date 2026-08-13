@@ -32,5 +32,12 @@ function getPDO(): PDO
     ]);
 
     $pdo->exec("SET time_zone = '+05:30'");
+
+    // Let the logger persist warnings and above to system_event_logs.
+    // Best effort: Logger degrades to file-only if the table is absent.
+    if (class_exists('Logger')) {
+        Logger::useDatabase($pdo);
+    }
+
     return $pdo;
 }

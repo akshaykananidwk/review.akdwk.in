@@ -18,9 +18,15 @@ function clientHasActiveSubscription(PDO $pdo, int $clientId): bool
         }
         $today = date('Y-m-d');
         return strcmp((string)$until, $today) >= 0;
-    } catch (Throwable) {
-        // Column missing before migration — do not block production traffic.
-        return true;
+    } catch (Throwable $e) {
+        // FAIL CLOSED. This is a paywall: a database error must not hand
+        // every expired client free access. The failure is logged as
+        // critical because it silently blocks paying customers too.
+        require_once __DIR__ . '/../services/Logger.php';
+        Logger::critical(Logger::CH_APP, 'Subscription check failed — denying access (fail closed)', [
+            'client_id' => $clientId,
+        ], $e);
+        return false;
     }
 }
 

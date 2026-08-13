@@ -24,6 +24,7 @@ require __DIR__ . '/partials/layout_head.php';
 <div class="card">
   <h3>Business Profile</h3>
   <form method="post" id="profileForm">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="update_profile">
     <div class="grid">
       <div><label>Business Name *</label><input name="business_name" value="<?= htmlspecialchars((string)$client['business_name']) ?>" required></div>
@@ -101,6 +102,7 @@ require __DIR__ . '/partials/layout_head.php';
     <button class="btn" type="submit" style="margin-top:10px">Save Profile</button>
   </form>
   <form method="post" style="margin-top:8px">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="preview_demo">
     <button class="btn btn-ghost" type="submit">Preview Review Demo</button>
   </form>
@@ -174,6 +176,7 @@ require __DIR__ . '/partials/layout_head.php';
     <p class="hint">No API key yet — generate one to enable POS webhooks.</p>
   <?php endif; ?>
   <form method="post" onsubmit="return confirm('Regenerate API key? The old key stops working immediately.');">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="regenerate_api_key">
     <button class="btn" type="submit"><?= !empty($client['api_key']) ? 'Regenerate API key' : 'Generate API key' ?></button>
   </form>
@@ -182,6 +185,7 @@ require __DIR__ . '/partials/layout_head.php';
 <div class="card">
   <h3>Change Password</h3>
   <form method="post">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="change_password">
     <div class="grid">
       <div><label>Current Password *</label><input type="password" name="current_password" required></div>

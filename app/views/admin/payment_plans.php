@@ -28,6 +28,7 @@ require __DIR__ . '/partials/layout_head.php';
   <h3 style="margin:0 0 10px;color:var(--peacock)">Add a New Recharge Plan</h3>
   <p style="color:#475569;font-size:.9rem;margin:0 0 12px">Like mobile recharge: each plan adds <strong>wallet credits</strong> plus <strong>validity days</strong> (30 = 1 month, 365 = 1 year). Clients use one recharge page only.</p>
   <form method="post">
+      <?= csrfField() ?>
     <input type="hidden" name="action" value="create_plan">
     <div class="grid-form">
       <div><label>Plan Name *</label><input name="name" required placeholder="e.g. Growth Pack"></div>
@@ -77,6 +78,7 @@ require __DIR__ . '/partials/layout_head.php';
                 <details>
                   <summary>Edit</summary>
                   <form method="post" style="margin-top:8px;background:#f8fafc;padding:10px;border-radius:10px">
+      <?= csrfField() ?>
                     <input type="hidden" name="action" value="update_plan">
                     <input type="hidden" name="plan_id" value="<?= (int)$p['id'] ?>">
                     <div class="grid-form">
@@ -101,11 +103,13 @@ require __DIR__ . '/partials/layout_head.php';
                   </form>
                 </details>
                 <form method="post" style="display:inline-block;margin-top:6px" onsubmit="return confirm('Toggle this plan active state?')">
+      <?= csrfField() ?>
                   <input type="hidden" name="action" value="toggle_plan">
                   <input type="hidden" name="plan_id" value="<?= (int)$p['id'] ?>">
                   <button type="submit" class="btn btn-toggle"><?= (int)$p['is_active'] === 1 ? 'Deactivate' : 'Activate' ?></button>
                 </form>
                 <form method="post" style="display:inline-block;margin-top:6px" onsubmit="return confirm('Delete this plan permanently? This will not refund any past payments.')">
+      <?= csrfField() ?>
                   <input type="hidden" name="action" value="delete_plan">
                   <input type="hidden" name="plan_id" value="<?= (int)$p['id'] ?>">
                   <button type="submit" class="btn btn-delete">Delete</button>

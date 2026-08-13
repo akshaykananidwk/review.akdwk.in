@@ -42,3 +42,9 @@ tools/standee_samples/
 .DS_Store
 Thumbs.db
 *.swp
+
+# Never commit database dumps - they contain customer PII and credentials
+*.sql.gz
+database/Database.sql
+database/*_dump.sql
+database/backup*.sql
