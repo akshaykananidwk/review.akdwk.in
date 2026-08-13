@@ -227,7 +227,7 @@ final class PublicReviewController
         if ($existingId > 0) {
             $existing = $pdo->prepare('SELECT review_text FROM pre_generated_reviews WHERE id = :id LIMIT 1');
             $existing->execute([':id' => $existingId]);
-            $text = (string)($existing->fetchColumn() ?: '');
+            $text = trim((string)($existing->fetchColumn() ?: ''));
             if ($text !== '') {
                 echo json_encode([
                     'ok' => true,
@@ -259,6 +259,16 @@ final class PublicReviewController
                 'reference' => $ref,
             ]);
             return;
+        }
+
+        if ($allocated !== null && trim($allocated['review_text']) === '') {
+            // Allocated but the stored text is unusable - do not hand the
+            // customer a blank review; treat it as the graceful path.
+            Logger::warning(Logger::CH_AI, 'Allocated review has empty text', [
+                'review_id' => $allocated['id'],
+                'client_id' => (int)$session['client_id'],
+            ]);
+            $allocated = null;
         }
 
         if ($allocated === null) {
@@ -415,10 +425,15 @@ final class PublicReviewController
         try {
             $stmt = $pdo->prepare($sql);
             $stmt->execute([':client_id' => $clientId]);
-        } catch (Throwable $e) {
-            // Older engines lack SKIP LOCKED. Fall back to a plain lock, but
-            // record why so this never degrades silently forever.
-            Logger::warning(Logger::CH_APP, 'SKIP LOCKED unavailable, using plain row lock', [
+        } catch (PDOException $e) {
+            // Only retry when the engine does not understand SKIP LOCKED
+            // (SQLSTATE 42000 = syntax/access error). A deadlock or lock
+            // timeout has already killed the transaction, so retrying the
+            // query there would fail confusingly - let it propagate.
+            if (($e->getCode() ?: '') !== '42000') {
+                throw $e;
+            }
+            Logger::warning(Logger::CH_APP, 'SKIP LOCKED unsupported, using plain row lock', [
                 'client_id' => $clientId,
             ], $e);
             $stmt = $pdo->prepare(str_replace('FOR UPDATE SKIP LOCKED', 'FOR UPDATE', $sql));
@@ -435,6 +450,18 @@ final class PublicReviewController
     private function queueBufferRefill(PDO $pdo, int $clientId): void
     {
         try {
+            // Deduplicate: one pending marker per client is enough, and
+            // ai_generation_jobs already grows faster than anything else in
+            // this database.
+            $pending = $pdo->prepare("
+                SELECT 1 FROM ai_generation_jobs
+                WHERE client_id = :client_id AND status = 'queued'
+                LIMIT 1
+            ");
+            $pending->execute([':client_id' => $clientId]);
+            if ($pending->fetchColumn()) {
+                return;
+            }
             $pdo->prepare("
                 INSERT INTO ai_generation_jobs
                     (client_id, trigger_source, status, requested_count, generated_count, attempt_count, created_at)

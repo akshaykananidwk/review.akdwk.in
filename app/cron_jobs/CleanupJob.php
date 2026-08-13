@@ -27,6 +27,18 @@ final class CleanupJob
             WHERE created_at < DATE_SUB(NOW(), INTERVAL " . self::KEEP_RATE_LIMIT_DAYS . " DAY)
         ");
 
+        // New in v1.4.0: unique bucket keys accumulate one row each.
+        $parts[] = 'rate_limit_buckets=' . $this->safeDelete($pdo, $log, "
+            DELETE FROM rate_limit_buckets
+            WHERE window_started_at < DATE_SUB(NOW(), INTERVAL 2 DAY)
+        ");
+
+        $parts[] = 'system_event_logs=' . $this->safeDelete($pdo, $log, "
+            DELETE FROM system_event_logs
+            WHERE severity IN ('debug','info','warning')
+              AND created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)
+        ");
+
         $parts[] = 'cron_job_runs=' . $this->safeDelete($pdo, $log, "
             DELETE FROM cron_job_runs
             WHERE started_at < DATE_SUB(NOW(), INTERVAL " . self::KEEP_CRON_RUNS_DAYS . " DAY)

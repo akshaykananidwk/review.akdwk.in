@@ -16,8 +16,8 @@ require_once TestRunner::path('app/services/Logger.php');
 // ---------------------------------------------------------------------
 $ref = Logger::newReference();
 TestRunner::ok(
-    'reference ID matches ERR-YYYYMMDD-XXXXXX',
-    (bool)preg_match('/^ERR-\d{8}-[0-9A-F]{6}$/', $ref),
+    'reference ID matches ERR-YYYYMMDD-XXXXXXXXXX',
+    (bool)preg_match('/^ERR-\d{8}-[0-9A-F]{10}$/', $ref),
     $ref
 );
 TestRunner::ok(
@@ -99,7 +99,7 @@ if (is_file($logFile)) {
     TestRunner::same('channel recorded', 'payment', $decoded['channel'] ?? null);
     TestRunner::ok('exception captured', isset($decoded['exception']['class']));
     TestRunner::ok('secret redacted on disk', !str_contains($tail, 'must-not-appear'));
-    TestRunner::ok('reference present on disk', (bool)preg_match('/ERR-\d{8}-[0-9A-F]{6}/', $tail));
+    TestRunner::ok('reference present on disk', (bool)preg_match('/ERR-\d{8}-[0-9A-F]{10}/', $tail));
 } else {
     TestRunner::skip('log file assertions', 'storage/logs not writable here');
 }
@@ -145,4 +145,33 @@ TestRunner::ok(
     'limiter never trusts X-Forwarded-For',
     str_contains($limiter, "REMOTE_ADDR") && !str_contains($limiter, 'HTTP_X_FORWARDED_FOR'),
     'spoofable headers would defeat IP limits'
+);
+
+// Review-driven hardening of the logging layer itself.
+$loggerSrc = TestRunner::source('app/services/Logger.php');
+TestRunner::ok(
+    'repeated identical events are collapsed within a request',
+    str_contains($loggerSrc, 'MAX_SAME_EVENT_PER_REQUEST'),
+    'a rate-limited flood must not cost more to block than to serve'
+);
+TestRunner::ok(
+    'no database write while the caller holds a transaction',
+    str_contains($loggerSrc, 'if ($pdo->inTransaction())'),
+    'the row would be rolled back with the failure it documents'
+);
+TestRunner::ok(
+    'reference IDs carry 40 bits of entropy',
+    str_contains($loggerSrc, 'random_bytes(5)'),
+    '24 bits collided at a few thousand events per day'
+);
+TestRunner::ok(
+    'storage/ carries a deny rule in case the docroot is misconfigured',
+    file_exists(TestRunner::path('storage/.htaccess')),
+    ''
+);
+TestRunner::ok(
+    'rate_limit_buckets and system_event_logs are pruned by the cleanup job',
+    str_contains(TestRunner::source('app/cron_jobs/CleanupJob.php'), 'rate_limit_buckets')
+        && str_contains(TestRunner::source('app/cron_jobs/CleanupJob.php'), 'system_event_logs'),
+    'unique bucket keys and log rows accumulate forever otherwise'
 );

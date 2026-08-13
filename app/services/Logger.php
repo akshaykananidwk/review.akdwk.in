@@ -15,7 +15,7 @@ declare(strict_types=1);
  *    so they are queryable from the admin panel (best effort — if the
  *    table is missing the file log still succeeds).
  *  - Every error/critical entry gets a reference ID of the form
- *    ERR-YYYYMMDD-XXXXXX which is safe to show to end users, while the
+ *    ERR-YYYYMMDD-XXXXXXXXXX which is safe to show to end users, while the
  *    exception, stack trace and context stay in the logs.
  *
  * Usage:
@@ -54,6 +54,9 @@ final class Logger
 
     private static ?PDO $pdo = null;
     private static bool $dbUnavailable = false;
+    /** @var array<string,int> fingerprint => times seen this request */
+    private static array $seen = [];
+    private const MAX_SAME_EVENT_PER_REQUEST = 3;
 
     /**
      * Give the logger a PDO handle so warnings and above can be
@@ -105,7 +108,7 @@ final class Logger
     }
 
     /**
-     * @return string reference ID (ERR-YYYYMMDD-XXXXXX)
+     * @return string reference ID (ERR-YYYYMMDD-XXXXXXXXXX)
      */
     public static function log(
         string $severity,
@@ -115,6 +118,16 @@ final class Logger
         ?Throwable $e = null
     ): string {
         $reference = self::newReference();
+
+        // Abuse floods (rate-limit rejections in particular) would otherwise
+        // make a blocked request cost more than a served one. Collapse
+        // repeats of the same event within a single request.
+        $fingerprint = $severity . '|' . $channel . '|' . substr($message, 0, 120);
+        $seenCount = (self::$seen[$fingerprint] ?? 0) + 1;
+        self::$seen[$fingerprint] = $seenCount;
+        if ($seenCount > self::MAX_SAME_EVENT_PER_REQUEST) {
+            return $reference;
+        }
 
         try {
             $entry = [
@@ -152,9 +165,9 @@ final class Logger
     public static function newReference(): string
     {
         try {
-            $suffix = strtoupper(bin2hex(random_bytes(3)));
+            $suffix = strtoupper(bin2hex(random_bytes(5)));
         } catch (Throwable) {
-            $suffix = strtoupper(substr(md5((string)microtime(true)), 0, 6));
+            $suffix = strtoupper(substr(md5((string)microtime(true)), 0, 10));
         }
         return 'ERR-' . date('Ymd') . '-' . $suffix;
     }
@@ -189,6 +202,16 @@ final class Logger
         }
         $pdo = self::$pdo;
         if (!$pdo instanceof PDO) {
+            return;
+        }
+        // If the caller is mid-transaction, an INSERT here would be rolled
+        // back along with their failure - losing precisely the event worth
+        // keeping. The file log already has it.
+        try {
+            if ($pdo->inTransaction()) {
+                return;
+            }
+        } catch (Throwable) {
             return;
         }
         try {

@@ -117,7 +117,7 @@ $row = $stmt->fetch();
 if (!$row) {
     // Only a genuine auth failure consumes the failure budget.
     rateLimitHit('invite_api:auth_fail', $clientIp, INVITE_MAX_AUTH_FAILURES_PER_IP, 3600);
-    Logger::security('POS invite API: invalid API key', ['key_prefix' => substr($apiKey, 0, 6)]);
+    Logger::security('POS invite API: invalid API key', ['key_length' => strlen($apiKey)]);
     http_response_code(401);
     echo json_encode(['ok' => false, 'message' => 'Invalid API key.']);
     exit;
