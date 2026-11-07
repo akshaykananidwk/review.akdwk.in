@@ -41,7 +41,7 @@ SET @col_exists := (
 );
 SET @ddl := IF(@col_exists = 0,
     'ALTER TABLE admins ADD COLUMN mobile VARCHAR(20) NULL AFTER email',
-    'SELECT 1');
+    'SET @noop := 1');
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;

@@ -91,6 +91,28 @@ final class TestRunner
     }
 
     /**
+     * The slice of a source file between two markers.
+     *
+     * Use this instead of a fixed-size window around a match: a window of
+     * N characters silently stops testing anything once the function it
+     * covers grows past N, and the assertion keeps passing for the wrong
+     * reason. Returns '' when either marker is missing, so the caller can
+     * assert that the slice was actually found.
+     */
+    public static function between(string $haystack, string $startMarker, string $endMarker): string
+    {
+        $start = strpos($haystack, $startMarker);
+        if ($start === false) {
+            return '';
+        }
+        $end = strpos($haystack, $endMarker, $start + strlen($startMarker));
+        if ($end === false) {
+            return '';
+        }
+        return substr($haystack, $start, $end - $start);
+    }
+
+    /**
      * Throwaway test database, or null when not configured.
      * Integration tests must skip rather than fail when this is null.
      */

@@ -27,7 +27,10 @@ SET @sql := IF(@fac_col = 0,
         ADD COLUMN category_id BIGINT UNSIGNED NULL AFTER facility_name,
         ADD CONSTRAINT fk_facilities_category FOREIGN KEY (category_id)
             REFERENCES business_categories(id) ON DELETE SET NULL ON UPDATE CASCADE",
-    'SELECT 1');
+    -- The no-op branch must NOT return rows: PDO::exec() never reads a
+    -- result set back, and an unread one breaks every later statement on
+    -- the connection with "Commands out of sync".
+    'SET @noop := 1');
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;

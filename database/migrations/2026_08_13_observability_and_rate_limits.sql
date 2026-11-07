@@ -45,7 +45,7 @@ SET @sql := IF(@col = 0,
         ADD COLUMN outcome ENUM('success','failure') NOT NULL DEFAULT 'success' AFTER user_type,
         ADD COLUMN failure_reason VARCHAR(100) NULL AFTER outcome,
         ADD KEY idx_login_history_outcome (outcome, login_at)",
-    'SELECT 1');
+    'SET @noop := 1');
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;

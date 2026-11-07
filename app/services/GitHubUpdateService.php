@@ -338,9 +338,21 @@ final class GitHubUpdateService
         $stmt->execute([':n' => $next, ':p' => $progress, ':id' => $updateId]);
     }
 
+    /**
+     * Record a failed step and clean up.
+     *
+     * Every part of this is independently guarded and nothing here is
+     * allowed to throw. The reason is that the most interesting failures
+     * are the ones that leave the database connection unusable: if this
+     * method dies partway, the update stays "running" forever, its log
+     * never says why, and the lock file is never released — which is
+     * exactly what happened on 2026-11-07. The file log is written first
+     * precisely because it is the one channel that does not need the
+     * database to be healthy.
+     */
     private function handleStepFailure(int $updateId, string $step, Throwable $e): void
     {
-        $this->logUpdate($updateId, 'ERROR in step "' . $step . '": ' . $e->getMessage());
+        $this->safeLog($updateId, 'ERROR in step "' . $step . '": ' . $e->getMessage());
         $rolledBack = false;
 
         // Files were touched from `deploy` onwards — restore the backup.
@@ -350,25 +362,51 @@ final class GitHubUpdateService
                 if (!empty($update['backup_id'])) {
                     $this->restoreBackup((int)$update['backup_id'], $updateId);
                     $rolledBack = true;
-                    $this->logUpdate($updateId, 'Automatic rollback completed — previous code and database restored.');
+                    $this->safeLog($updateId, 'Automatic rollback completed — previous code and database restored.');
                 }
             } catch (Throwable $re) {
-                $this->logUpdate($updateId, 'CRITICAL: automatic rollback failed: ' . $re->getMessage());
+                $this->safeLog($updateId, 'CRITICAL: automatic rollback failed: ' . $re->getMessage());
             }
         }
 
-        $stmt = $this->pdo->prepare("
-            UPDATE system_updates
-            SET status = :st, error_message = :err, finished_at = NOW(), next_step = NULL
-            WHERE id = :id
-        ");
-        $stmt->execute([
-            ':st' => $rolledBack ? 'rolled_back' : 'failed',
-            ':err' => substr($e->getMessage(), 0, 5000),
-            ':id' => $updateId,
-        ]);
-        $this->cleanupStaging();
+        try {
+            $stmt = $this->pdo->prepare("
+                UPDATE system_updates
+                SET status = :st, error_message = :err, finished_at = NOW(), next_step = NULL
+                WHERE id = :id
+            ");
+            $stmt->execute([
+                ':st' => $rolledBack ? 'rolled_back' : 'failed',
+                ':err' => substr($e->getMessage(), 0, 5000),
+                ':id' => $updateId,
+            ]);
+        } catch (Throwable $se) {
+            // The row keeps saying "running". Say so where it can still
+            // be read, so the state is explainable afterwards.
+            $this->writeLogFile($updateId, 'CRITICAL: could not mark this update as '
+                . ($rolledBack ? 'rolled_back' : 'failed') . ' in the database: ' . $se->getMessage());
+        }
+
+        try {
+            $this->cleanupStaging();
+        } catch (Throwable $ce) {
+            $this->writeLogFile($updateId, 'Staging cleanup failed: ' . $ce->getMessage());
+        }
+
+        // Last, and unconditionally: holding the lock blocks every future
+        // update until the 30-minute stale timeout expires.
         $this->releaseLock();
+    }
+
+    /** logUpdate() that cannot throw, for use on the failure path. */
+    private function safeLog(int $updateId, string $message): void
+    {
+        try {
+            $this->logUpdate($updateId, $message);
+        } catch (Throwable $le) {
+            $this->writeLogFile($updateId, $message
+                . ' (not recorded in the database: ' . $le->getMessage() . ')');
+        }
     }
 
     // ------------------------------------------------------------------
@@ -648,6 +686,17 @@ final class GitHubUpdateService
         $this->logUpdate($updateId, 'Deploy complete: ' . $deployed . ' file(s) updated, '
             . $identical . ' unchanged file(s) skipped, ' . $skipped . ' protected path(s) preserved'
             . ($removed > 0 ? ', ' . $removed . ' obsolete file(s) removed' : '') . '.');
+
+        // Reset OPcache HERE, not only in finalize. The remaining steps
+        // run as separate requests, so with opcache.validate_timestamps=0
+        // they would otherwise execute the previous release's bytecode —
+        // meaning a fix to the migration runner itself could not take
+        // effect in the very update that deploys it.
+        if (function_exists('opcache_reset')) {
+            @opcache_reset();
+            $this->logUpdate($updateId, 'OPcache cleared so the remaining steps run the new code.');
+        }
+
         $this->advance($updateId, 'deploy');
     }
 
@@ -1096,7 +1145,7 @@ final class GitHubUpdateService
             $sql = (string)file_get_contents($path);
             $this->logUpdate($updateId, 'Running migration: ' . $file);
             foreach ($this->splitSqlStatements($sql) as $statement) {
-                $this->pdo->exec($statement);
+                $this->runSqlStatement($statement);
             }
             $this->pdo->prepare("
                 INSERT INTO system_migrations (migration_file, applied_at, update_id) VALUES (:f, NOW(), :u)
@@ -1104,6 +1153,37 @@ final class GitHubUpdateService
             $applied[] = $file;
         }
         return $applied;
+    }
+
+    /**
+     * Run one migration statement and leave the connection clean.
+     *
+     * PDO::exec() sends the query but never reads a result set back, so a
+     * statement that returns rows — a SELECT guard, or EXECUTE of a
+     * prepared SELECT — leaves that result sitting on the wire. Every
+     * later query on the same connection then fails with "Commands out of
+     * sync", *including* the logging and the status update that would have
+     * reported the failure. The update is then stuck as "running" with an
+     * empty log and a lock nobody released. query() + closeCursor() is the
+     * documented way to free the connection again.
+     */
+    private function runSqlStatement(string $statement): void
+    {
+        $stmt = $this->pdo->query($statement);
+        if (!$stmt instanceof PDOStatement) {
+            return;
+        }
+        try {
+            // Stored procedures and multi-result statements can return
+            // more than one set; all of them have to go.
+            while ($stmt->nextRowset()) {
+                // drain
+            }
+        } catch (Throwable) {
+            // nextRowset() throws for statements that have no rowset at
+            // all. Nothing to drain in that case.
+        }
+        $stmt->closeCursor();
     }
 
     /** @return string[] sorted migration file names */
@@ -1250,7 +1330,7 @@ final class GitHubUpdateService
             throw new RuntimeException('Updater migration file is missing: database/migrations/2026_08_04_github_auto_update_system.sql');
         }
         foreach ($this->splitSqlStatements((string)file_get_contents($file)) as $statement) {
-            $this->pdo->exec($statement);
+            $this->runSqlStatement($statement);
         }
         // The freshly installed schema matches the migrations on disk, so
         // baseline them all — only future migration files should run.
@@ -1275,6 +1355,7 @@ final class GitHubUpdateService
                 throw new RuntimeException('Another update is already in progress. Try again in a few minutes.');
             }
             @unlink($path); // stale lock from a crashed run
+            $this->closeOrphanedUpdates();
         }
         if (@file_put_contents($path, (string)getmypid(), LOCK_EX) === false) {
             throw new RuntimeException('Cannot create the update lock file (storage/ not writable?).');
@@ -1284,6 +1365,31 @@ final class GitHubUpdateService
     public function releaseLock(): void
     {
         @unlink($this->lockPath());
+    }
+
+    /**
+     * A lock older than the stale window means its PHP process is gone.
+     * Any update still marked "running" from that era is never going to
+     * finish, so close it out instead of leaving the history claiming an
+     * update is in progress forever. Best effort: this runs while
+     * starting another update and must not block it.
+     */
+    private function closeOrphanedUpdates(): void
+    {
+        try {
+            $this->pdo->prepare("
+                UPDATE system_updates
+                SET status = 'failed',
+                    next_step = NULL,
+                    finished_at = NOW(),
+                    error_message = COALESCE(NULLIF(error_message, ''),
+                        'Interrupted: the update process stopped without reporting a result. See storage/logs/update.log.')
+                WHERE status = 'running'
+                  AND started_at < DATE_SUB(NOW(), INTERVAL " . (int)(self::LOCK_STALE_SECONDS / 60) . " MINUTE)
+            ")->execute();
+        } catch (Throwable) {
+            // History tidying is never worth failing a new update over.
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1559,16 +1665,31 @@ final class GitHubUpdateService
     // Logging
     // ------------------------------------------------------------------
 
+    /**
+     * The file line is written first and the database row second, so a
+     * broken connection costs the admin-panel log but never the on-disk
+     * one — the only copy that survives a failure bad enough to take the
+     * database with it.
+     */
     private function logUpdate(int $updateId, string $message): void
     {
         $line = '[' . date('Y-m-d H:i:s') . '] ' . $message;
+        $this->writeLogFile($updateId, $message);
         $stmt = $this->pdo->prepare("
             UPDATE system_updates
             SET log_text = CONCAT(COALESCE(log_text, ''), :line)
             WHERE id = :id
         ");
         $stmt->execute([':line' => $line . "\n", ':id' => $updateId]);
-        @file_put_contents($this->logFile, '[update #' . $updateId . '] ' . $line . "\n", FILE_APPEND | LOCK_EX);
+    }
+
+    private function writeLogFile(int $updateId, string $message): void
+    {
+        @file_put_contents(
+            $this->logFile,
+            '[update #' . $updateId . '] [' . date('Y-m-d H:i:s') . '] ' . $message . "\n",
+            FILE_APPEND | LOCK_EX
+        );
     }
 
     private function humanBytes(int $bytes): string

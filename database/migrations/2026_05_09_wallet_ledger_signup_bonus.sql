@@ -16,21 +16,21 @@ SET @col_used := (
     SELECT COUNT(*) FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clients' AND COLUMN_NAME = 'monthly_quota_used'
 );
-SET @ddl := IF(@col_used > 0, 'ALTER TABLE clients DROP COLUMN monthly_quota_used', 'SELECT 1');
+SET @ddl := IF(@col_used > 0, 'ALTER TABLE clients DROP COLUMN monthly_quota_used', 'SET @noop := 1');
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @col_limit := (
     SELECT COUNT(*) FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clients' AND COLUMN_NAME = 'monthly_quota_limit'
 );
-SET @ddl := IF(@col_limit > 0, 'ALTER TABLE clients DROP COLUMN monthly_quota_limit', 'SELECT 1');
+SET @ddl := IF(@col_limit > 0, 'ALTER TABLE clients DROP COLUMN monthly_quota_limit', 'SET @noop := 1');
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @col_month := (
     SELECT COUNT(*) FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clients' AND COLUMN_NAME = 'quota_usage_month'
 );
-SET @ddl := IF(@col_month > 0, 'ALTER TABLE clients DROP COLUMN quota_usage_month', 'SELECT 1');
+SET @ddl := IF(@col_month > 0, 'ALTER TABLE clients DROP COLUMN quota_usage_month', 'SET @noop := 1');
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- Make sure wallet_balance exists (older installs may be missing it).
@@ -40,7 +40,7 @@ SET @col_wallet := (
 );
 SET @ddl := IF(@col_wallet = 0,
     'ALTER TABLE clients ADD COLUMN wallet_balance INT NOT NULL DEFAULT 0 AFTER mobile',
-    'SELECT 1');
+    'SET @noop := 1');
 PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- ---------------------------------------------------------------------
