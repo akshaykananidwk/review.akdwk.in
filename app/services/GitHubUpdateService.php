@@ -1355,11 +1355,13 @@ final class GitHubUpdateService
                 throw new RuntimeException('Another update is already in progress. Try again in a few minutes.');
             }
             @unlink($path); // stale lock from a crashed run
-            $this->closeOrphanedUpdates();
         }
         if (@file_put_contents($path, (string)getmypid(), LOCK_EX) === false) {
             throw new RuntimeException('Cannot create the update lock file (storage/ not writable?).');
         }
+        // We hold the lock now, so anything else still marked "running"
+        // from before the stale window is dead and can be closed out.
+        $this->closeOrphanedUpdates();
     }
 
     public function releaseLock(): void
