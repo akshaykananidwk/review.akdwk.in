@@ -107,17 +107,54 @@ TestRunner::ok(
     $offenders === [] ? '' : 'offending files: ' . implode(', ', $offenders)
 );
 
-// The category migration added for Varni Associate must stay re-runnable:
-// facility_name is UNIQUE table-wide, so an unguarded INSERT would abort a
-// second attempt and roll the whole update back.
-$categoryMigration = TestRunner::source('database/migrations/2026_11_07_insurance_advisor_category.sql');
+// Catalogue migrations (a business category plus its facilities) must
+// stay re-runnable: facility_name is UNIQUE table-wide, so one unguarded
+// INSERT would abort a second attempt and roll the whole update back.
+$catalogueMigrations = [
+    '2026_11_07_insurance_advisor_category.sql',
+    '2026_11_08_agarbatti_pooja_category.sql',
+];
+foreach ($catalogueMigrations as $name) {
+    $sql = TestRunner::source('database/migrations/' . $name);
+    TestRunner::ok("{$name} exists", $sql !== '');
+    TestRunner::ok(
+        "{$name} guards both inserts against re-running",
+        substr_count($sql, 'NOT EXISTS') === 2,
+        'one guard for the category row, one for the facility rows'
+    );
+    TestRunner::ok(
+        "{$name} uses FROM DUAL where it has a WHERE clause",
+        str_contains($sql, 'FROM DUAL'),
+        'MySQL rejects WHERE on a SELECT with no FROM'
+    );
+
+    // Every facility name must be unique across the whole catalogue, or
+    // the UNIQUE index silently drops it from its own category.
+    preg_match('/CROSS JOIN \((.*?)\) AS t/s', $sql, $m);
+    preg_match_all("/SELECT\s+'([^']+)'/", $m[1] ?? '', $found);
+    $names = $found[1] ?? [];
+    TestRunner::ok(
+        "{$name} declares facilities with no internal duplicates",
+        $names !== [] && count($names) === count(array_unique($names)),
+        count($names) . ' name(s) found'
+    );
+    TestRunner::ok(
+        "{$name} keeps every facility name within the 120-char column",
+        array_filter($names, static fn(string $n): bool => strlen($n) > 120) === []
+    );
+}
+
+// Across files, too — two catalogue migrations claiming the same name
+// would mean whichever runs second quietly loses it.
+$allNames = [];
+foreach ($catalogueMigrations as $name) {
+    preg_match('/CROSS JOIN \((.*?)\) AS t/s', TestRunner::source('database/migrations/' . $name), $m);
+    preg_match_all("/SELECT\s+'([^']+)'/", $m[1] ?? '', $found);
+    $allNames = array_merge($allNames, $found[1] ?? []);
+}
+$collisions = array_keys(array_filter(array_count_values($allNames), static fn(int $c): bool => $c > 1));
 TestRunner::ok(
-    'the category migration is guarded against re-running',
-    substr_count($categoryMigration, 'NOT EXISTS') === 2,
-    'one guard for the category row, one for the facility rows'
-);
-TestRunner::ok(
-    'the category migration uses FROM DUAL where it has a WHERE clause',
-    str_contains($categoryMigration, 'FROM DUAL'),
-    'MySQL rejects WHERE on a SELECT with no FROM'
+    'no facility name is claimed by two categories',
+    $collisions === [],
+    $collisions === [] ? '' : 'collides: ' . implode(', ', $collisions)
 );
