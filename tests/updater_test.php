@@ -110,29 +110,59 @@ TestRunner::ok(
 // Catalogue migrations (a business category plus its facilities) must
 // stay re-runnable: facility_name is UNIQUE table-wide, so one unguarded
 // INSERT would abort a second attempt and roll the whole update back.
-$catalogueMigrations = [
-    '2026_11_07_insurance_advisor_category.sql',
-    '2026_11_08_agarbatti_pooja_category.sql',
-];
-foreach ($catalogueMigrations as $name) {
-    $sql = TestRunner::source('database/migrations/' . $name);
-    TestRunner::ok("{$name} exists", $sql !== '');
+//
+// Discovered rather than listed, so a new catalogue migration is covered
+// the moment it is added instead of when somebody remembers to edit this
+// file.
+// Comments are stripped first, exactly as GitHubUpdateService's splitter
+// does before execution. Counting them would make a sentence in a header
+// comment stand in for a real guard.
+$stripComments = static function (string $sql): string {
+    $kept = [];
+    foreach (preg_split('/\r?\n/', $sql) ?: [] as $line) {
+        if (str_starts_with(ltrim($line), '--') || str_starts_with(ltrim($line), '#')) {
+            continue;
+        }
+        $kept[] = $line;
+    }
+    return implode("\n", $kept);
+};
+
+$catalogue = [];
+foreach (glob($migrationDir . '/*.sql') ?: [] as $file) {
+    $sql = $stripComments((string)file_get_contents($file));
+    if (str_contains($sql, 'INSERT INTO business_categories')) {
+        $catalogue[basename($file)] = $sql;
+    }
+}
+TestRunner::ok('catalogue migrations were found', $catalogue !== [], count($catalogue) . ' file(s)');
+
+/** @var array<string,string> $nameOwner facility name => file that declares it */
+$nameOwner = [];
+$collisions = [];
+
+foreach ($catalogue as $name => $sql) {
+    $categoryInserts = substr_count($sql, 'INSERT INTO business_categories');
+    $facilityInserts = substr_count($sql, 'INSERT INTO facilities');
+
+    TestRunner::same("{$name} declares one facility block per category", $categoryInserts, $facilityInserts);
     TestRunner::ok(
-        "{$name} guards both inserts against re-running",
-        substr_count($sql, 'NOT EXISTS') === 2,
-        'one guard for the category row, one for the facility rows'
+        "{$name} guards every insert against re-running",
+        substr_count($sql, 'NOT EXISTS') === $categoryInserts + $facilityInserts,
+        'expected ' . ($categoryInserts + $facilityInserts) . ' guards, found ' . substr_count($sql, 'NOT EXISTS')
     );
-    TestRunner::ok(
-        "{$name} uses FROM DUAL where it has a WHERE clause",
-        str_contains($sql, 'FROM DUAL'),
-        'MySQL rejects WHERE on a SELECT with no FROM'
+    TestRunner::same(
+        "{$name} uses FROM DUAL on every category insert",
+        $categoryInserts,
+        substr_count($sql, 'FROM DUAL')
     );
 
-    // Every facility name must be unique across the whole catalogue, or
-    // the UNIQUE index silently drops it from its own category.
-    preg_match('/CROSS JOIN \((.*?)\) AS t/s', $sql, $m);
-    preg_match_all("/SELECT\s+'([^']+)'/", $m[1] ?? '', $found);
-    $names = $found[1] ?? [];
+    preg_match_all('/CROSS JOIN \((.*?)\) AS t/s', $sql, $blocks);
+    $names = [];
+    foreach ($blocks[1] ?? [] as $block) {
+        preg_match_all("/SELECT\s+'([^']+)'/", $block, $found);
+        $names = array_merge($names, $found[1] ?? []);
+    }
     TestRunner::ok(
         "{$name} declares facilities with no internal duplicates",
         $names !== [] && count($names) === count(array_unique($names)),
@@ -142,19 +172,29 @@ foreach ($catalogueMigrations as $name) {
         "{$name} keeps every facility name within the 120-char column",
         array_filter($names, static fn(string $n): bool => strlen($n) > 120) === []
     );
+
+    foreach ($names as $facility) {
+        if (isset($nameOwner[$facility])) {
+            $collisions[] = $facility . ' (' . $nameOwner[$facility] . ' / ' . $name . ')';
+        }
+        $nameOwner[$facility] = $name;
+    }
 }
 
-// Across files, too — two catalogue migrations claiming the same name
-// would mean whichever runs second quietly loses it.
-$allNames = [];
-foreach ($catalogueMigrations as $name) {
-    preg_match('/CROSS JOIN \((.*?)\) AS t/s', TestRunner::source('database/migrations/' . $name), $m);
-    preg_match_all("/SELECT\s+'([^']+)'/", $m[1] ?? '', $found);
-    $allNames = array_merge($allNames, $found[1] ?? []);
-}
-$collisions = array_keys(array_filter(array_count_values($allNames), static fn(int $c): bool => $c > 1));
+// facility_name is UNIQUE table-wide, so a name claimed by two categories
+// is silently dropped from whichever one is inserted second — the client
+// never sees it in their settings, and no error is raised.
 TestRunner::ok(
     'no facility name is claimed by two categories',
     $collisions === [],
-    $collisions === [] ? '' : 'collides: ' . implode(', ', $collisions)
+    $collisions === [] ? count($nameOwner) . ' distinct names' : 'collides: ' . implode(', ', $collisions)
+);
+
+// The eight names seeded without a category would collide the same way.
+preg_match_all("/\('([^']+)', 1\)/", TestRunner::source('database/seed.sql'), $seeded);
+$seedClash = array_intersect($seeded[1] ?? [], array_keys($nameOwner));
+TestRunner::ok(
+    'no catalogue facility reuses a seeded facility name',
+    $seedClash === [],
+    $seedClash === [] ? '' : 'collides with seed.sql: ' . implode(', ', $seedClash)
 );
