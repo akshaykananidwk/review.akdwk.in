@@ -29,6 +29,26 @@ require __DIR__ . '/partials/layout_head.php';
       <a href="<?= APP_URL ?>/client_wallet.php">History &rsaquo;</a>
     </div>
   </section>
+  <section class="card">
+    <div>Plan Valid Until</div>
+    <div class="v" style="font-size:1.25rem">
+      <?= $validity['valid_until_human'] !== null ? htmlspecialchars($validity['valid_until_human']) : '&mdash;' ?>
+    </div>
+    <div class="small-note">
+      <?php if ($validity['days_left'] !== null && $validity['days_left'] >= 0): ?>
+        <span class="plan-chip plan-<?= htmlspecialchars($validity['state']) ?>" style="padding:2px 9px">
+          <?= (int)$validity['days_left'] === 0
+              ? 'Last day'
+              : (int)$validity['days_left'] . ' day' . ((int)$validity['days_left'] === 1 ? '' : 's') . ' left' ?>
+        </span>
+      <?php elseif ($validity['days_left'] !== null): ?>
+        <span class="plan-chip plan-expired" style="padding:2px 9px">Expired</span>
+      <?php else: ?>
+        <span class="plan-chip plan-none" style="padding:2px 9px">Not set</span>
+      <?php endif; ?>
+      &middot; <a href="<?= APP_URL ?>/client_recharge.php" style="font-weight:700;color:#16a34a">Extend</a>
+    </div>
+  </section>
   <section class="card"><div>Price Per Review</div><div class="v">&#8377;<?= (int)$pricePerReview ?></div></section>
   <section class="card"><div>Today's 5-Star Reviews</div><div class="v" id="todayUsedCount"><?= (int)$todayUsed ?></div></section>
   <section class="card"><div>This Week</div><div class="v" id="weekUsedCount"><?= (int)$weekUsed ?></div></section>

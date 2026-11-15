@@ -159,6 +159,131 @@ function applyAdminTopupValidity(PDO $pdo, int $clientId, string $mode, int $val
 }
 
 /**
+ * Everything the client panel needs to tell a client when their access
+ * ends, in one place.
+ *
+ * A client could previously only find their expiry date on the recharge
+ * page, written as a bare 2026-12-15 with no sense of how close it was.
+ * This returns a human date plus the days remaining, so the panel can
+ * warn before access is cut off instead of after.
+ *
+ * `state` is one of:
+ *   ok       comfortably in date
+ *   warning  inside WARN_DAYS of expiry
+ *   critical inside CRITICAL_DAYS of expiry, or expires today
+ *   expired  the date has passed
+ *   none     no expiry date is set on the account
+ *   unknown  the lookup failed — say nothing rather than guess
+ *
+ * days_left counts whole days from today and is 0 on the last valid day,
+ * matching clientHasActiveSubscription(), which treats today as active.
+ *
+ * @return array{
+ *   valid_until:?string, valid_until_human:?string, days_left:?int,
+ *   state:string, is_active:bool, headline:string, detail:string
+ * }
+ */
+function clientValidityStatus(PDO $pdo, int $clientId): array
+{
+    static $cache = [];
+    if (array_key_exists($clientId, $cache)) {
+        return $cache[$clientId];
+    }
+
+    $warnDays = 10;
+    $criticalDays = 3;
+
+    $base = [
+        'valid_until' => null,
+        'valid_until_human' => null,
+        'days_left' => null,
+        'state' => 'unknown',
+        'is_active' => false,
+        'headline' => '',
+        'detail' => '',
+    ];
+
+    try {
+        $st = $pdo->prepare('SELECT subscription_valid_until FROM clients WHERE id = :id LIMIT 1');
+        $st->execute([':id' => $clientId]);
+        $row = $st->fetch();
+    } catch (Throwable $e) {
+        require_once __DIR__ . '/../services/Logger.php';
+        Logger::warning(Logger::CH_APP, 'Could not read subscription validity for the client panel', [
+            'client_id' => $clientId,
+        ], $e);
+        return $cache[$clientId] = $base;
+    }
+
+    if (!$row) {
+        return $cache[$clientId] = $base;
+    }
+
+    $until = trim((string)($row['subscription_valid_until'] ?? ''));
+    if ($until === '') {
+        $base['state'] = 'none';
+        $base['headline'] = 'No expiry date set';
+        $base['detail'] = 'Contact support to activate your plan validity.';
+        return $cache[$clientId] = $base;
+    }
+
+    $untilDt = DateTimeImmutable::createFromFormat('!Y-m-d', $until);
+    if ($untilDt === false) {
+        return $cache[$clientId] = $base;   // unknown: do not guess at a malformed date
+    }
+
+    $today = new DateTimeImmutable('today');
+    $daysLeft = (int)$today->diff($untilDt)->format('%r%a');
+
+    $base['valid_until'] = $untilDt->format('Y-m-d');
+    $base['valid_until_human'] = $untilDt->format('d M Y');
+    $base['days_left'] = $daysLeft;
+    $base['is_active'] = $daysLeft >= 0;
+
+    if ($daysLeft < 0) {
+        $base['state'] = 'expired';
+        $base['headline'] = 'Your plan expired on ' . $base['valid_until_human'];
+        $base['detail'] = abs($daysLeft) === 1
+            ? 'It expired 1 day ago. Recharge to restore your QR reviews and dashboard.'
+            : 'It expired ' . abs($daysLeft) . ' days ago. Recharge to restore your QR reviews and dashboard.';
+    } elseif ($daysLeft === 0) {
+        $base['state'] = 'critical';
+        $base['headline'] = 'Your plan expires today';
+        $base['detail'] = 'Recharge today to avoid any break in your QR reviews.';
+    } elseif ($daysLeft <= $criticalDays) {
+        $base['state'] = 'critical';
+        $base['headline'] = 'Your plan expires in ' . $daysLeft . ($daysLeft === 1 ? ' day' : ' days');
+        $base['detail'] = 'Valid until ' . $base['valid_until_human'] . '. Recharge now to stay active.';
+    } elseif ($daysLeft <= $warnDays) {
+        $base['state'] = 'warning';
+        $base['headline'] = 'Your plan expires in ' . $daysLeft . ' days';
+        $base['detail'] = 'Valid until ' . $base['valid_until_human'] . '. Recharge any time to extend it.';
+    } else {
+        $base['state'] = 'ok';
+        $base['headline'] = 'Plan active until ' . $base['valid_until_human'];
+        $base['detail'] = $daysLeft . ' days remaining.';
+    }
+
+    return $cache[$clientId] = $base;
+}
+
+/** Short chip text for the panel header: "12 Dec 2026 · 27 days left". */
+function validityChipText(array $status): string
+{
+    if ($status['valid_until_human'] === null) {
+        return $status['state'] === 'none' ? 'No expiry set' : '';
+    }
+    $days = (int)$status['days_left'];
+    if ($days < 0) {
+        return $status['valid_until_human'] . ' · expired';
+    }
+    if ($days === 0) {
+        return $status['valid_until_human'] . ' · last day';
+    }
+    return $status['valid_until_human'] . ' · ' . $days . ($days === 1 ? ' day left' : ' days left');
+}
+
+/**
  * @return array{label:string, class:string}
  */
 function validityStatusBadge(?string $validUntil): array

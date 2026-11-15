@@ -7,6 +7,9 @@ $clientForLayout = $client;
 $validUntil = trim((string)($client['subscription_valid_until'] ?? ''));
 $isRenewFlow = isset($_GET['renew']) && (string)$_GET['renew'] === '1';
 $accessActive = $validUntil !== '' && strcmp($validUntil, date('Y-m-d')) >= 0;
+// This page explains the expiry in context, with the plans to fix it
+// right below. The layout's generic notice would just repeat it.
+$suppressPlanNotice = true;
 require __DIR__ . '/partials/layout_head.php';
 ?>
 <style>
@@ -51,7 +54,23 @@ require __DIR__ . '/partials/layout_head.php';
   <section class="card"><div>Wallet Balance</div><div class="v">&#8377;<?= (int)$client['wallet_balance'] ?></div></section>
   <section class="card"><div>Price Per Review</div><div class="v">&#8377;<?= (int)$pricePerReview ?></div></section>
   <section class="card"><div>Reviews You Can Run Now</div><div class="v"><?= (int)floor((int)$client['wallet_balance'] / max(1, $pricePerReview)) ?></div></section>
-  <section class="card"><div>Valid Until</div><div class="v" style="font-size:1.15rem"><?= $validUntil !== '' ? htmlspecialchars($validUntil) : '—' ?></div></section>
+  <section class="card">
+    <div>Valid Until</div>
+    <div class="v" style="font-size:1.15rem">
+      <?= $validity['valid_until_human'] !== null ? htmlspecialchars($validity['valid_until_human']) : '&mdash;' ?>
+    </div>
+    <?php if ($validity['days_left'] !== null): ?>
+      <div style="font-size:.9rem;color:#475569;margin-top:4px">
+        <?php if ((int)$validity['days_left'] < 0): ?>
+          Expired <?= abs((int)$validity['days_left']) ?> day<?= abs((int)$validity['days_left']) === 1 ? '' : 's' ?> ago
+        <?php elseif ((int)$validity['days_left'] === 0): ?>
+          Last day today
+        <?php else: ?>
+          <?= (int)$validity['days_left'] ?> day<?= (int)$validity['days_left'] === 1 ? '' : 's' ?> left
+        <?php endif; ?>
+      </div>
+    <?php endif; ?>
+  </section>
 </div>
 
 <div class="card">

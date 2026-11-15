@@ -5,6 +5,18 @@ if (!isset($pageTitle)) { $pageTitle = 'Client Panel'; }
 if (!isset($activeMenu)) { $activeMenu = ''; }
 if (!isset($clientForLayout) || !is_array($clientForLayout)) { $clientForLayout = []; }
 
+// Plan expiry, resolved here rather than in each controller so it shows
+// on every page of the panel — clients were complaining they could not
+// find out when their access ends. clientValidityStatus() caches per
+// request, so this costs one query no matter how many places read it.
+require_once __DIR__ . '/../../../helpers/subscription_helper.php';
+require_once __DIR__ . '/../../../config/database.php';
+$layoutClientId = (int)($clientForLayout['id'] ?? ($_SESSION['client_id'] ?? 0));
+$validity = $layoutClientId > 0
+    ? clientValidityStatus(getPDO(), $layoutClientId)
+    : ['state' => 'unknown', 'valid_until' => null, 'valid_until_human' => null,
+       'days_left' => null, 'is_active' => false, 'headline' => '', 'detail' => ''];
+
 $clientMenu = [
     ['key' => 'dashboard', 'label' => 'Dashboard',       'href' => APP_URL . '/dashboard.php',        'icon' => 'D'],
     ['key' => 'standee',   'label' => 'Standee Gallery', 'href' => APP_URL . '/standee_gallery.php',  'icon' => 'P'],
@@ -98,6 +110,38 @@ $clientMenu = [
     .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:.78rem;font-weight:700}
     .pill-credit{background:#dcfce7;color:#166534}
     .pill-debit{background:#fee2e2;color:#991b1b}
+
+    /* Plan validity: header chip + full-width notice */
+    .plan-chip{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:5px 11px;border-radius:999px;
+      font-size:.8rem;font-weight:700;white-space:nowrap;
+      border:1px solid transparent;text-decoration:none;
+    }
+    .plan-chip .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 7px}
+    .plan-chip .chip-label{font-weight:600;opacity:.8}
+    .plan-ok{background:#ecfdf5;color:#166534;border-color:#bbf7d0}
+    .plan-warning{background:#fffbeb;color:#92400e;border-color:#fde68a}
+    .plan-critical{background:#fff7ed;color:#9a3412;border-color:#fdba74}
+    .plan-expired{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+    .plan-none{background:#f1f5f9;color:#475569;border-color:#cbd5e1}
+
+    .plan-notice{
+      display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+      padding:12px 14px;border-radius:12px;border:1px solid;margin-bottom:14px;
+    }
+    .plan-notice strong{display:block;font-size:1rem}
+    .plan-notice span{font-size:.9rem;opacity:.9}
+    .plan-notice .btn{flex:0 0 auto}
+    .notice-warning{background:#fffbeb;border-color:#fde68a;color:#92400e}
+    .notice-critical{background:#fff7ed;border-color:#fdba74;color:#9a3412}
+    .notice-expired{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+    .notice-none{background:#f1f5f9;border-color:#cbd5e1;color:#334155}
+
+    @media (max-width:640px){
+      .biz-chip{flex-wrap:wrap;justify-content:flex-end;gap:6px}
+      .plan-chip{font-size:.74rem;padding:4px 9px}
+    }
   </style>
 </head>
 <body>
@@ -131,10 +175,32 @@ $clientMenu = [
         <h1><?= htmlspecialchars((string)$pageTitle) ?></h1>
       </div>
       <div class="biz-chip">
-        <?php if (!empty($clientForLayout['wallet_balance']) || $clientForLayout['wallet_balance'] === 0): ?>
+        <?php if (!empty($clientForLayout['wallet_balance']) || ($clientForLayout['wallet_balance'] ?? null) === 0): ?>
           <span>Wallet: <strong><?= (int)$clientForLayout['wallet_balance'] ?></strong> credits</span>
+        <?php endif; ?>
+        <?php if (in_array($validity['state'], ['ok', 'warning', 'critical', 'expired', 'none'], true)): ?>
+          <a class="plan-chip plan-<?= htmlspecialchars($validity['state']) ?>"
+             href="<?= APP_URL ?>/client_recharge.php"
+             title="<?= htmlspecialchars($validity['headline'] . ' — ' . $validity['detail']) ?>">
+            <span class="dot"></span>
+            <span class="chip-label">Plan:</span>
+            <span><?= htmlspecialchars(validityChipText($validity)) ?></span>
+          </a>
         <?php endif; ?>
         <span class="top-actions"><a class="logout" href="<?= APP_URL ?>/logout.php">Logout</a></span>
       </div>
     </header>
     <main class="app-content">
+<?php if (empty($suppressPlanNotice) && in_array($validity['state'], ['warning', 'critical', 'expired', 'none'], true)): ?>
+      <div class="plan-notice notice-<?= htmlspecialchars($validity['state']) ?>">
+        <div>
+          <strong><?= htmlspecialchars($validity['headline']) ?></strong>
+          <span><?= htmlspecialchars($validity['detail']) ?></span>
+        </div>
+        <?php if ($validity['state'] !== 'none'): ?>
+          <a class="btn" href="<?= APP_URL ?>/client_recharge.php<?= $validity['state'] === 'expired' ? '?renew=1' : '' ?>">
+            <?= $validity['state'] === 'expired' ? 'Recharge Now' : 'Extend Plan' ?>
+          </a>
+        <?php endif; ?>
+      </div>
+<?php endif; ?>
