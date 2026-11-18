@@ -260,9 +260,12 @@ function clientValidityStatus(PDO $pdo, int $clientId): array
 
     $until = trim((string)($row['subscription_valid_until'] ?? ''));
     if ($until === '') {
+        // No validity at all. Since the platform is paid from day one,
+        // this is the normal state of a business that has registered but
+        // not yet recharged — so it points at the fix, not at support.
         $base['state'] = 'none';
-        $base['headline'] = 'No expiry date set';
-        $base['detail'] = 'Contact support to activate your plan validity.';
+        $base['headline'] = 'No active plan';
+        $base['detail'] = 'Recharge your wallet to activate your QR standee and start collecting reviews.';
         return $cache[$clientId] = $base;
     }
 

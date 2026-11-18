@@ -142,7 +142,7 @@ final class ResellerController
                             VALUES (:c,:t,:u,:p,1,NOW())
                         ")->execute([':c' => $clientId, ':t' => $token, ':u' => $publicUrl, ':p' => $relative]);
 
-                        $trialDays = max(0, (int)getSystemSetting($pdo, 'signup_subscription_trial_days', '30'));
+                        $trialDays = max(0, (int)getSystemSetting($pdo, 'signup_subscription_trial_days', '0'));
                         if ($trialDays > 0) {
                             try {
                                 $pdo->prepare("UPDATE clients SET subscription_valid_until = DATE_ADD(CURDATE(), INTERVAL {$trialDays} DAY) WHERE id = :id")

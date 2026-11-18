@@ -197,10 +197,8 @@ $clientMenu = [
           <strong><?= htmlspecialchars($validity['headline']) ?></strong>
           <span><?= htmlspecialchars($validity['detail']) ?></span>
         </div>
-        <?php if ($validity['state'] !== 'none'): ?>
-          <a class="btn" href="<?= APP_URL ?>/client_recharge.php<?= $validity['state'] === 'expired' ? '?renew=1' : '' ?>">
-            <?= $validity['state'] === 'expired' ? 'Recharge Now' : 'Extend Plan' ?>
-          </a>
-        <?php endif; ?>
+        <a class="btn" href="<?= APP_URL ?>/client_recharge.php<?= in_array($validity['state'], ['expired', 'none'], true) ? '?renew=1' : '' ?>">
+          <?= in_array($validity['state'], ['expired', 'none'], true) ? 'Recharge Now' : 'Extend Plan' ?>
+        </a>
       </div>
 <?php endif; ?>

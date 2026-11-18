@@ -112,10 +112,14 @@ TestRunner::ok(
 // 'unknown': a failed lookup must produce no claim about the expiry date
 // at all, rather than a chip reading "No expiry set".
 preg_match_all("/in_array\(\\\$validity\['state'\], \[(.*?)\], true\)/", $layout, $guards);
-TestRunner::same('both render guards were found', 2, count($guards[1] ?? []));
+TestRunner::ok(
+    'the state guards were found',
+    count($guards[1] ?? []) >= 2,
+    count($guards[1] ?? []) . ' guard(s)'
+);
 foreach ($guards[1] ?? [] as $i => $list) {
     TestRunner::ok(
-        "render guard #" . ($i + 1) . " excludes the unknown state",
+        'state guard #' . ($i + 1) . ' excludes the unknown state',
         !str_contains($list, 'unknown'),
         trim($list)
     );
@@ -132,12 +136,12 @@ TestRunner::ok(
 );
 
 // ---------------------------------------------------------------------
-// The three-year free offer was withdrawn
+// The platform is paid: no free offers anywhere
 //
-// It was advertised in Gujarati on the landing banner, in English in the
-// FAQ, and granted as a 1095-day default in three PHP files. All of it
-// has to stay gone, and a stale number in copy is exactly the kind of
-// thing that creeps back.
+// This started as a three-year Devbhumi Dwarka offer, was cut to one
+// year, and is now withdrawn entirely along with the sign-up trial. Copy
+// is the part that rots: the page once advertised three years free and a
+// three-month trial while the settings granted neither.
 // ---------------------------------------------------------------------
 TestRunner::same('365 days reads as one year', '1 year', humanValidityPeriod(365)['en']);
 TestRunner::same('365 days reads as one year in Gujarati', '1 વર્ષ', humanValidityPeriod(365)['gu']);
@@ -148,59 +152,133 @@ TestRunner::same('a period that is neither is given in days', '45 days', humanVa
 TestRunner::same('zero is not dressed up as a free period', 'no free period', humanValidityPeriod(0)['en']);
 TestRunner::same('a negative setting cannot promise anything', 'no free period', humanValidityPeriod(-5)['en']);
 
-$publicCopy = [];
-foreach (['public', 'app/views', 'app/controllers'] as $dir) {
+// The location offer is gone root and branch. Facility names in the
+// catalogue migrations legitimately contain the word "free" (Free
+// Installation, Charcoal Free), so this looks for the offer itself.
+$offerTraces = [];
+foreach (['app', 'public'] as $dir) {
     $base = TestRunner::path($dir);
     $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS));
     foreach ($it as $f) {
         /** @var SplFileInfo $f */
-        if ($f->isFile() && strtolower($f->getExtension()) === 'php') {
-            $publicCopy[substr($f->getPathname(), strlen(TestRunner::path('')))] = (string)file_get_contents($f->getPathname());
+        if (!$f->isFile() || strtolower($f->getExtension()) !== 'php') {
+            continue;
+        }
+        if (str_contains((string)file_get_contents($f->getPathname()), 'special_district')) {
+            $offerTraces[] = substr($f->getPathname(), strlen(TestRunner::path('')));
         }
     }
 }
-$publicCopy['README.md'] = TestRunner::source('README.md');
+TestRunner::ok(
+    'no code still reads or writes the special-district offer',
+    $offerTraces === [],
+    $offerTraces === [] ? '' : 'still references it: ' . implode(', ', $offerTraces)
+);
 
-$threeYear = [];
-foreach ($publicCopy as $path => $body) {
-    if (preg_match('/3 years|three years|3 વર્ષ|ત્રણ વર્ષ|1095/u', $body)) {
-        $threeYear[] = $path;
+// Public-facing promises, by phrase rather than by the bare word, so
+// "Free platform days" in an admin hint is not a false positive.
+$promises = [
+    'free trial', 'Free trial', 'completely FREE', 'FREE for', 'free plan',
+    'Get Started Free', 'Start Free', 'બિલકુલ FREE', 'ફ્રી ટ્રાયલ', 'ત્રણ વર્ષ', '3 વર્ષ',
+];
+$copyFiles = [
+    'public/index.php' => TestRunner::source('public/index.php'),
+    'README.md' => TestRunner::source('README.md'),
+    'app/views/admin/global_settings.php' => TestRunner::source('app/views/admin/global_settings.php'),
+];
+$found = [];
+foreach ($copyFiles as $path => $body) {
+    foreach ($promises as $phrase) {
+        if (str_contains($body, $phrase)) {
+            $found[] = $path . ': "' . $phrase . '"';
+        }
     }
 }
 TestRunner::ok(
-    'no three-year free offer survives in code, views or docs',
-    $threeYear === [],
-    $threeYear === [] ? '' : 'still mentions it: ' . implode(', ', $threeYear)
+    'no page promises anything free',
+    $found === [],
+    $found === [] ? '' : implode(' | ', $found)
 );
 
-// The landing copy must come from the settings, not be typed into the page.
+// Any wording about a trial must be generated from the setting that
+// grants it, and that setting defaults to zero in every call site.
 $landing = TestRunner::source('public/index.php');
 TestRunner::ok(
-    'the offer banner derives its duration from the setting',
-    str_contains($landing, 'humanValidityPeriod(') && str_contains($landing, "\$specialFreePeriod['gu']"),
-    'a hard-coded duration is how the page came to promise more than the product gave'
+    'the landing page derives trial wording from the setting',
+    str_contains($landing, "getSystemSetting(\$pdo, 'signup_subscription_trial_days', '0')")
+        && str_contains($landing, '$trialPeriod = $trialDays > 0'),
+    'hard-coded copy is how the page came to advertise an offer that did not exist'
 );
 TestRunner::ok(
-    'the FAQ answer derives its duration too',
-    str_contains($landing, "\$specialFreePeriod['en']") && str_contains($landing, "\$standardFreePeriod['en']"),
+    'structured data no longer tells Google the product is free',
+    !str_contains($landing, "'price' => '0'"),
+    'price 0 in the Offer schema advertises free software in search results'
+);
+
+$zeroDefault = [];
+foreach (['app/controllers/ClientController.php', 'app/controllers/ResellerController.php',
+          'app/controllers/SuperAdminController.php', 'public/index.php'] as $path) {
+    $body = TestRunner::source($path);
+    if (!str_contains($body, 'signup_subscription_trial_days')) {
+        continue;
+    }
+    if (preg_match("/signup_subscription_trial_days'[^)]*'([1-9]\d*)'/", $body, $m)) {
+        $zeroDefault[] = $path . ' defaults to ' . $m[1];
+    }
+}
+TestRunner::ok(
+    'the sign-up trial defaults to zero everywhere it is read',
+    $zeroDefault === [],
+    $zeroDefault === [] ? '' : implode(', ', $zeroDefault)
+);
+
+// A business that has registered but not paid is the normal state now,
+// so the panel has to point them at recharging, not at support.
+TestRunner::ok(
+    'the no-plan message tells the client how to fix it',
+    str_contains(TestRunner::source('app/helpers/subscription_helper.php'), 'Recharge your wallet to activate'),
+    'the old copy said "contact support", which is now the common case and a dead end'
+);
+TestRunner::ok(
+    'the no-plan notice carries a recharge button',
+    str_contains(TestRunner::source('app/views/client/partials/layout_head.php'),
+        "in_array(\$validity['state'], ['expired', 'none'], true) ? 'Recharge Now'"),
     ''
 );
 
-// And the migration has to clean up what is already saved in the live
-// database, since a PHP default is ignored once a value exists there.
-$cleanup = TestRunner::source('database/migrations/2026_11_18_remove_three_year_free_offer.sql');
+// And the live database has to be cleaned, since a saved setting always
+// beats a PHP default.
+$cleanup = TestRunner::source('database/migrations/2026_11_18_platform_is_paid_remove_free_offers.sql');
+TestRunner::ok('the cleanup migration exists', $cleanup !== '');
 TestRunner::ok(
-    'the migration rewrites stored landing copy, not just the defaults',
-    str_contains($cleanup, 'landing_offer_text') && str_contains($cleanup, 'landing_faqs'),
+    'it deletes the special-district settings',
+    str_contains($cleanup, "DELETE FROM system_settings")
+        && str_contains($cleanup, "'special_district_names', 'special_district_trial_days'"),
     ''
 );
 TestRunner::ok(
-    'the migration only lowers the setting when it is still the old default',
-    str_contains($cleanup, "TRIM(setting_value) = '1095'"),
-    'an admin who chose a different number must keep it'
+    'it zeroes the sign-up trial',
+    str_contains($cleanup, "signup_subscription_trial_days") && str_contains($cleanup, "SET setting_value = '0'"),
+    ''
 );
 TestRunner::ok(
-    'the migration leaves already-granted client validity alone',
-    !str_contains($cleanup, 'UPDATE clients'),
-    'shortening access a customer already has is a business decision, not a migration'
+    'it turns the offer banner off',
+    str_contains($cleanup, 'landing_offer_enabled'),
+    ''
+);
+TestRunner::ok(
+    'it clears stored copy that still advertises something free',
+    str_contains($cleanup, 'landing_offer_text') && str_contains($cleanup, 'landing_faqs')
+        && str_contains($cleanup, "LIKE '%ફ્રી%'"),
+    'Gujarati copy would survive an English-only sweep'
+);
+TestRunner::ok(
+    'it never shortens validity a client already holds',
+    !str_contains($cleanup, 'UPDATE clients') && !str_contains($cleanup, 'DELETE FROM clients'),
+    'cutting off a paying or promised customer is a business decision, not a migration'
+);
+TestRunner::ok(
+    'the superseded migration is retired through the removal manifest',
+    str_contains(TestRunner::source('deploy/removals.txt'), '2026_11_18_remove_three_year_free_offer.sql'),
+    'otherwise it stays on servers that already deployed it'
 );

@@ -188,21 +188,12 @@ final class ClientController
                 $bonusGiven = $signupBonus;
             }
 
-            $trialDays = max(0, (int)getSystemSetting($pdo, 'signup_subscription_trial_days', '30'));
-
-            // Location offer: businesses from the configured special
-            // districts (default: Devbhumi Dwarka) get the longer free
-            // validity instead of the standard trial.
-            $specialDistricts = array_filter(array_map(
-                static fn(string $d): string => mb_strtolower(trim($d)),
-                explode(',', getSystemSetting($pdo, 'special_district_names', 'Devbhumi Dwarka'))
-            ));
-            if ($district !== '' && in_array(mb_strtolower($district), $specialDistricts, true)) {
-                $specialDays = max(0, (int)getSystemSetting($pdo, 'special_district_trial_days', '365'));
-                if ($specialDays > $trialDays) {
-                    $trialDays = $specialDays;
-                }
-            }
+            // The platform is paid: a new business starts with no validity
+            // and recharges before their QR goes live. The setting stays so
+            // a trial can be switched on deliberately from Global Settings,
+            // but it is off by default and there is no location-based
+            // exception to it.
+            $trialDays = max(0, (int)getSystemSetting($pdo, 'signup_subscription_trial_days', '0'));
 
             if ($trialDays > 0) {
                 try {

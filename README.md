@@ -180,20 +180,33 @@ drops its own tables.
 - `public/robots.txt` + `public/sitemap.php` (submit the sitemap URL in
   Google Search Console).
 
-## Location Offer (Devbhumi Dwarka FREE)
+## Pricing model (paid platform)
 
-Registration captures City + District (Gujarat district dropdown;
-migration `2026_08_05_client_city_district.sql`). Districts listed in
-the `special_district_names` setting (default "Devbhumi Dwarka") get
-`special_district_trial_days` free validity (default 365 = 1 year)
-instead of the standard `signup_subscription_trial_days`. Both editable
-in Admin → Global Settings.
+The platform is paid from day one. A new business registers, recharges
+their wallet, and one credit is consumed per review delivered. There is
+no free tier and no location-based free offer — the Devbhumi Dwarka
+offer and its `special_district_*` settings were removed in
+`2026_11_18_platform_is_paid_remove_free_offers.sql`.
 
-The homepage offer banner and the "Is it free in Devbhumi Dwarka?" FAQ
-derive their wording from these two settings via
-`humanValidityPeriod()`, so the advertised offer cannot drift away from
-the validity actually granted. Change the number, and the public copy
-changes with it.
+Registration still captures City + District (migration
+`2026_08_05_client_city_district.sql`) as business data; it no longer
+grants anything.
+
+Two settings control what, if anything, a new business is given, both in
+Admin → Global Settings and both **0 by default**:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `signup_subscription_trial_days` | `0` | Free platform days on registration. 0 = must recharge before the QR works. |
+| `signup_bonus_amount` | `0` | Wallet credits auto-granted on registration. |
+
+The landing page reads both. With the defaults it advertises no free
+period at all; set a trial and the offer banner, the hero strip and the
+FAQ all describe it automatically via `humanValidityPeriod()`. The
+public copy is generated from the settings precisely so it can never
+promise more than the product gives — the earlier hard-coded wording
+advertised a three-year offer and a three-month trial while the settings
+said otherwise.
 
 ## GitHub Auto Update System
 

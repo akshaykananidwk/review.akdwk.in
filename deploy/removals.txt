@@ -27,3 +27,9 @@ public/dashboard_regenerate_qr.php
 # Production database dump committed by mistake. Contained customer PII,
 # password hashes and live API keys.
 database/Database.sql
+
+# --- v1.4.7 (platform is paid: free offers withdrawn) ---------------
+# Superseded before most servers ran it. It only lowered the Dwarka
+# offer from 3 years to 1 year; the offer itself is now gone, and
+# 2026_11_18_platform_is_paid_remove_free_offers.sql does the whole job.
+database/migrations/2026_11_18_remove_three_year_free_offer.sql

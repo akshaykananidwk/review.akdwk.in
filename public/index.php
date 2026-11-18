@@ -115,8 +115,8 @@ $seoDescription = getSystemSetting(
     $pdo,
     'seo_description',
     'Get more 5-star Google reviews automatically with a smart QR code standee, AI review generator, '
-    . 'star-rating gating and daily WhatsApp reports. Free trial for local businesses — '
-    . 'special FREE plan for Devbhumi Dwarka (Gujarat) shops, hotels and services.'
+    . 'star-rating gating and daily WhatsApp reports. Simple wallet pricing for shops, hotels '
+    . 'and services across Gujarat — pay only for the reviews you collect.'
 );
 $seoKeywords = getSystemSetting(
     $pdo,
@@ -125,22 +125,21 @@ $seoKeywords = getSystemSetting(
     . 'review qr code standee, ai review generator, google review system gujarat, google review dwarka, '
     . 'review management software, 5 star review qr code, whatsapp review report, review qr stand price'
 );
-// The advertised free periods are derived from the same settings that
-// actually grant them, so the page can never promise a longer offer than
-// the product gives. Change the number in Global Settings and this text
-// follows it.
+// This is a paid platform. Nothing on this page may advertise a free
+// period unless one is actually configured, so any wording about a trial
+// is built from signup_subscription_trial_days — which is 0 by default.
 require_once __DIR__ . '/../app/helpers/subscription_helper.php';
-$specialDistrictLabel = trim((string)getSystemSetting($pdo, 'special_district_names', 'Devbhumi Dwarka'));
-$specialDistrictLabel = trim(explode(',', $specialDistrictLabel)[0] ?? 'Devbhumi Dwarka');
-$specialFreePeriod = humanValidityPeriod((int)getSystemSetting($pdo, 'special_district_trial_days', '365'));
-$standardFreePeriod = humanValidityPeriod((int)getSystemSetting($pdo, 'signup_subscription_trial_days', '30'));
+$trialDays = max(0, (int)getSystemSetting($pdo, 'signup_subscription_trial_days', '0'));
+$trialPeriod = $trialDays > 0 ? humanValidityPeriod($trialDays) : null;
+$signupBonusCredits = max(0, (int)getSystemSetting($pdo, 'signup_bonus_amount', '0'));
 
-$offerEnabled = (int)getSystemSetting($pdo, 'landing_offer_enabled', '1') === 1;
+$offerEnabled = (int)getSystemSetting($pdo, 'landing_offer_enabled', '0') === 1;
 $offerText = getSystemSetting(
     $pdo,
     'landing_offer_text',
-    '🎉 ખાસ ઓફર: દેવભૂમિ દ્વારકા જિલ્લાના તમામ વેપારીઓ માટે ' . $specialFreePeriod['gu']
-        . ' સુધી બિલકુલ FREE — બાકી બધા માટે ' . $standardFreePeriod['gu'] . ' ફ્રી ટ્રાયલ!'
+    $trialPeriod !== null
+        ? '🎉 નવા વેપારીઓ માટે ' . $trialPeriod['gu'] . ' ની ટ્રાયલ — પછી વાપરો એટલું જ ચૂકવો.'
+        : '📈 વાપરો એટલું જ ચૂકવો — કોઈ માસિક કરાર નહીં, કોઈ છૂપો ચાર્જ નહીં.'
 );
 
 // FAQ (visible section + FAQPage schema) — editable via `landing_faqs` JSON.
@@ -151,9 +150,11 @@ if (!is_array($faqs) || $faqs === []) {
         ['q' => 'What is a Google review QR code stand?', 'a' => 'It is a printed standee with a unique QR code for your business. Customers scan it, tap a star rating, and 4–5 star customers are guided straight to your Google review page — so your Google profile grows automatically.'],
         ['q' => 'How does the AI review generator work?', 'a' => 'The system keeps a ready buffer of natural, category-aware review texts for your business. A happy customer just taps once — no typing needed — and posts the review on Google in seconds.'],
         ['q' => 'What happens when a customer gives 1–3 stars?', 'a' => 'Low ratings are captured privately as internal feedback and never pushed to Google. You see the feedback in your dashboard and can fix the issue — your public rating only goes up.'],
-        ['q' => 'Is it free for businesses in Devbhumi Dwarka?', 'a' => 'Yes! All businesses in Devbhumi Dwarka district (Dwarka, Khambhalia, Bhanvad, Okha, Salaya area) get the platform completely FREE for ' . $specialFreePeriod['en'] . '. Businesses elsewhere get a free trial of ' . $standardFreePeriod['en'] . '. After the free period it is simple wallet recharges — you only pay for the reviews you collect.'],
+        ['q' => 'How does the pricing work?', 'a' => 'It is a wallet, like a mobile recharge. You top up credits and one credit is used each time a customer is served a ready review. There is no monthly contract and no setup fee, so a quiet month simply costs you less.'],
         ['q' => 'Do I need any technical knowledge?', 'a' => 'No. Register your business, download your print-ready QR standee, and place it on your counter. Everything else — review flow, WhatsApp reports, analytics — runs automatically.'],
-        ['q' => 'How much does it cost after the free period?', 'a' => 'Simple wallet-based recharges like a mobile plan — pay only for the reviews you collect. No monthly contract, no hidden fees, cancel anytime.'],
+        ['q' => 'Do I have to pay before I can start?', 'a' => ($trialPeriod !== null
+            ? 'New businesses get ' . $trialPeriod['en'] . ' to try the system, and recharge when it ends.'
+            : 'Yes. Register your business, recharge your wallet, and your QR standee goes live straight away. You only pay for the reviews you actually collect.')],
     ];
 }
 
@@ -169,7 +170,15 @@ $jsonLd = [
         'operatingSystem' => 'Web',
         'url' => $canonicalUrl,
         'description' => $seoDescription,
-        'offers' => ['@type' => 'Offer', 'price' => '0', 'priceCurrency' => 'INR', 'description' => 'Free trial — special free plan for Devbhumi Dwarka businesses'],
+        // Declaring price 0 told Google this was free software. It is a
+        // paid wallet product, so the offer quotes the real per-review
+        // price from settings.
+        'offers' => [
+            '@type' => 'Offer',
+            'price' => (string)max(1, (int)getSystemSetting($pdo, 'price_per_review', '1')),
+            'priceCurrency' => 'INR',
+            'description' => 'Wallet-based pricing — pay per review collected, no monthly contract',
+        ],
     ],
     [
         '@context' => 'https://schema.org',
@@ -403,11 +412,17 @@ $jsonLd = [
       <h1><?= htmlspecialchars($heroHeadline) ?></h1>
       <p class="lead"><?= htmlspecialchars($heroSubheadline) ?></p>
       <div class="hero-cta">
-        <a href="<?= APP_URL ?>/register.php" class="btn btn-primary btn-lg">Get Started Free →</a>
+        <a href="<?= APP_URL ?>/register.php" class="btn btn-primary btn-lg">Get Started →</a>
         <a href="<?= htmlspecialchars($demoUrl) ?>" class="btn btn-ghost btn-lg" target="_blank" rel="noopener">▶ Try Demo</a>
       </div>
       <div class="hero-trust">
-        <span>✅ <strong>Sign-up bonus included</strong></span>
+        <?php if ($signupBonusCredits > 0): ?>
+          <span>✅ <strong><?= (int)$signupBonusCredits ?> sign-up credits</strong></span>
+        <?php elseif ($trialPeriod !== null): ?>
+          <span>✅ <strong><?= htmlspecialchars($trialPeriod['en']) ?> to try it</strong></span>
+        <?php else: ?>
+          <span>✅ <strong>Pay only per review</strong></span>
+        <?php endif; ?>
         <span>✅ <strong>No setup fee</strong></span>
         <span>✅ <strong>Cancel anytime</strong></span>
       </div>
@@ -577,7 +592,7 @@ $jsonLd = [
   <div class="container">
     <div class="section-eyebrow">FAQ</div>
     <h2 class="section-title">Frequently Asked Questions</h2>
-    <p class="section-sub">Everything about the Google review QR stand, pricing and the free offer.</p>
+    <p class="section-sub">Everything about the Google review QR stand, how it works and what it costs.</p>
     <div class="faq-list">
       <?php foreach ($faqs as $faq): ?>
         <details class="faq-item">
@@ -596,7 +611,7 @@ $jsonLd = [
       <h2>Ready to get more 5-star Google reviews?</h2>
       <p>Register your business, claim your sign-up bonus, and download your QR standee in under 2 minutes.</p>
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-        <a href="<?= APP_URL ?>/register.php" class="btn btn-primary btn-lg">Start Free →</a>
+        <a href="<?= APP_URL ?>/register.php" class="btn btn-primary btn-lg">Create Your Account →</a>
         <?php if ($helplineNumber !== ''): ?>
           <a href="tel:<?= htmlspecialchars($helplineTel) ?>" class="btn btn-ghost btn-lg" style="background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.3)">📞 Call <?= htmlspecialchars($helplineNumber) ?></a>
         <?php endif; ?>
