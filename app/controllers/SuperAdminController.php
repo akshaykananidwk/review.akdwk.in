@@ -1083,7 +1083,7 @@ final class SuperAdminController
                 upsertSystemSetting($pdo, 'signup_bonus_amount', (string)$signupBonusAmount, 'int', $adminId);
                 upsertSystemSetting($pdo, 'signup_subscription_trial_days', (string)$signupSubscriptionTrialDays, 'int', $adminId);
                 $specialDistrictNames = trim((string)($_POST['special_district_names'] ?? ''));
-                $specialDistrictTrialDays = max(0, (int)($_POST['special_district_trial_days'] ?? 1095));
+                $specialDistrictTrialDays = max(0, (int)($_POST['special_district_trial_days'] ?? 365));
                 upsertSystemSetting($pdo, 'special_district_names', $specialDistrictNames, 'string', $adminId);
                 upsertSystemSetting($pdo, 'special_district_trial_days', (string)$specialDistrictTrialDays, 'int', $adminId);
                 upsertSystemSetting($pdo, 'default_welcome_standee_template_id', (string)$defaultWelcomeStandeeTpl, 'int', $adminId);
@@ -1249,7 +1249,7 @@ final class SuperAdminController
         $signupBonusAmount = max(0, (int)getSystemSetting($pdo, 'signup_bonus_amount', '0'));
         $signupSubscriptionTrialDays = max(0, (int)getSystemSetting($pdo, 'signup_subscription_trial_days', '30'));
         $specialDistrictNames = getSystemSetting($pdo, 'special_district_names', 'Devbhumi Dwarka');
-        $specialDistrictTrialDays = max(0, (int)getSystemSetting($pdo, 'special_district_trial_days', '1095'));
+        $specialDistrictTrialDays = max(0, (int)getSystemSetting($pdo, 'special_district_trial_days', '365'));
         $defaultStandeeTemplateId = (int)getSystemSetting($pdo, 'default_welcome_standee_template_id', '0');
         $reviewInviteMessageTemplate = getSystemSetting(
             $pdo,

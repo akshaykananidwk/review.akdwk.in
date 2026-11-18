@@ -103,6 +103,45 @@ function paymentPlansHaveDurationDays(PDO $pdo): bool
     }
 }
 
+/**
+ * Turn a configured number of free days into the phrase the public site
+ * shows, in Gujarati and English.
+ *
+ * The landing copy used to hard-code its durations, which meant the
+ * advertised offer and the validity actually granted could drift apart —
+ * and did: the page promised a three-year Dwarka offer and a three-month
+ * trial while the settings said otherwise. Deriving the words from the
+ * same setting that grants the days keeps the promise and the product in
+ * step, and changing the offer becomes one number in Global Settings.
+ *
+ * @return array{gu:string, en:string}
+ */
+function humanValidityPeriod(int $days): array
+{
+    $days = max(0, $days);
+    if ($days === 0) {
+        return ['gu' => 'કોઈ ફ્રી સમય નહીં', 'en' => 'no free period'];
+    }
+    if ($days % 365 === 0) {
+        $years = intdiv($days, 365);
+        return [
+            'gu' => $years . ' વર્ષ',
+            'en' => $years . ' year' . ($years === 1 ? '' : 's'),
+        ];
+    }
+    if ($days % 30 === 0) {
+        $months = intdiv($days, 30);
+        return [
+            'gu' => $months . ' મહિન' . ($months === 1 ? 'ો' : 'ા'),
+            'en' => $months . ' month' . ($months === 1 ? '' : 's'),
+        ];
+    }
+    return [
+        'gu' => $days . ' દિવસ',
+        'en' => $days . ' day' . ($days === 1 ? '' : 's'),
+    ];
+}
+
 function formatValidityDaysLabel(int $days): string
 {
     if ($days === 30) {

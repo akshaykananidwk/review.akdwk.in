@@ -130,3 +130,77 @@ TestRunner::ok(
     str_contains(TestRunner::source('app/views/client/dashboard.php'), 'Plan Valid Until'),
     ''
 );
+
+// ---------------------------------------------------------------------
+// The three-year free offer was withdrawn
+//
+// It was advertised in Gujarati on the landing banner, in English in the
+// FAQ, and granted as a 1095-day default in three PHP files. All of it
+// has to stay gone, and a stale number in copy is exactly the kind of
+// thing that creeps back.
+// ---------------------------------------------------------------------
+TestRunner::same('365 days reads as one year', '1 year', humanValidityPeriod(365)['en']);
+TestRunner::same('365 days reads as one year in Gujarati', '1 વર્ષ', humanValidityPeriod(365)['gu']);
+TestRunner::same('90 days reads as three months', '3 months', humanValidityPeriod(90)['en']);
+TestRunner::same('30 days is singular', '1 month', humanValidityPeriod(30)['en']);
+TestRunner::same('30 days is singular in Gujarati', '1 મહિનો', humanValidityPeriod(30)['gu']);
+TestRunner::same('a period that is neither is given in days', '45 days', humanValidityPeriod(45)['en']);
+TestRunner::same('zero is not dressed up as a free period', 'no free period', humanValidityPeriod(0)['en']);
+TestRunner::same('a negative setting cannot promise anything', 'no free period', humanValidityPeriod(-5)['en']);
+
+$publicCopy = [];
+foreach (['public', 'app/views', 'app/controllers'] as $dir) {
+    $base = TestRunner::path($dir);
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS));
+    foreach ($it as $f) {
+        /** @var SplFileInfo $f */
+        if ($f->isFile() && strtolower($f->getExtension()) === 'php') {
+            $publicCopy[substr($f->getPathname(), strlen(TestRunner::path('')))] = (string)file_get_contents($f->getPathname());
+        }
+    }
+}
+$publicCopy['README.md'] = TestRunner::source('README.md');
+
+$threeYear = [];
+foreach ($publicCopy as $path => $body) {
+    if (preg_match('/3 years|three years|3 વર્ષ|ત્રણ વર્ષ|1095/u', $body)) {
+        $threeYear[] = $path;
+    }
+}
+TestRunner::ok(
+    'no three-year free offer survives in code, views or docs',
+    $threeYear === [],
+    $threeYear === [] ? '' : 'still mentions it: ' . implode(', ', $threeYear)
+);
+
+// The landing copy must come from the settings, not be typed into the page.
+$landing = TestRunner::source('public/index.php');
+TestRunner::ok(
+    'the offer banner derives its duration from the setting',
+    str_contains($landing, 'humanValidityPeriod(') && str_contains($landing, "\$specialFreePeriod['gu']"),
+    'a hard-coded duration is how the page came to promise more than the product gave'
+);
+TestRunner::ok(
+    'the FAQ answer derives its duration too',
+    str_contains($landing, "\$specialFreePeriod['en']") && str_contains($landing, "\$standardFreePeriod['en']"),
+    ''
+);
+
+// And the migration has to clean up what is already saved in the live
+// database, since a PHP default is ignored once a value exists there.
+$cleanup = TestRunner::source('database/migrations/2026_11_18_remove_three_year_free_offer.sql');
+TestRunner::ok(
+    'the migration rewrites stored landing copy, not just the defaults',
+    str_contains($cleanup, 'landing_offer_text') && str_contains($cleanup, 'landing_faqs'),
+    ''
+);
+TestRunner::ok(
+    'the migration only lowers the setting when it is still the old default',
+    str_contains($cleanup, "TRIM(setting_value) = '1095'"),
+    'an admin who chose a different number must keep it'
+);
+TestRunner::ok(
+    'the migration leaves already-granted client validity alone',
+    !str_contains($cleanup, 'UPDATE clients'),
+    'shortening access a customer already has is a business decision, not a migration'
+);

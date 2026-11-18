@@ -185,9 +185,15 @@ drops its own tables.
 Registration captures City + District (Gujarat district dropdown;
 migration `2026_08_05_client_city_district.sql`). Districts listed in
 the `special_district_names` setting (default "Devbhumi Dwarka") get
-`special_district_trial_days` free validity (default 1095 = 3 years)
+`special_district_trial_days` free validity (default 365 = 1 year)
 instead of the standard `signup_subscription_trial_days`. Both editable
 in Admin → Global Settings.
+
+The homepage offer banner and the "Is it free in Devbhumi Dwarka?" FAQ
+derive their wording from these two settings via
+`humanValidityPeriod()`, so the advertised offer cannot drift away from
+the validity actually granted. Change the number, and the public copy
+changes with it.
 
 ## GitHub Auto Update System
 

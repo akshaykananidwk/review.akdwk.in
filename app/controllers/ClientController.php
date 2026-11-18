@@ -198,7 +198,7 @@ final class ClientController
                 explode(',', getSystemSetting($pdo, 'special_district_names', 'Devbhumi Dwarka'))
             ));
             if ($district !== '' && in_array(mb_strtolower($district), $specialDistricts, true)) {
-                $specialDays = max(0, (int)getSystemSetting($pdo, 'special_district_trial_days', '1095'));
+                $specialDays = max(0, (int)getSystemSetting($pdo, 'special_district_trial_days', '365'));
                 if ($specialDays > $trialDays) {
                     $trialDays = $specialDays;
                 }

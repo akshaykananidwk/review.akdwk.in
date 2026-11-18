@@ -125,11 +125,22 @@ $seoKeywords = getSystemSetting(
     . 'review qr code standee, ai review generator, google review system gujarat, google review dwarka, '
     . 'review management software, 5 star review qr code, whatsapp review report, review qr stand price'
 );
+// The advertised free periods are derived from the same settings that
+// actually grant them, so the page can never promise a longer offer than
+// the product gives. Change the number in Global Settings and this text
+// follows it.
+require_once __DIR__ . '/../app/helpers/subscription_helper.php';
+$specialDistrictLabel = trim((string)getSystemSetting($pdo, 'special_district_names', 'Devbhumi Dwarka'));
+$specialDistrictLabel = trim(explode(',', $specialDistrictLabel)[0] ?? 'Devbhumi Dwarka');
+$specialFreePeriod = humanValidityPeriod((int)getSystemSetting($pdo, 'special_district_trial_days', '365'));
+$standardFreePeriod = humanValidityPeriod((int)getSystemSetting($pdo, 'signup_subscription_trial_days', '30'));
+
 $offerEnabled = (int)getSystemSetting($pdo, 'landing_offer_enabled', '1') === 1;
 $offerText = getSystemSetting(
     $pdo,
     'landing_offer_text',
-    '🎉 ખાસ ઓફર: દેવભૂમિ દ્વારકા જિલ્લાના તમામ વેપારીઓ માટે 3 વર્ષ સુધી બિલકુલ FREE — બાકી બધા માટે 3 મહિના ફ્રી ટ્રાયલ!'
+    '🎉 ખાસ ઓફર: દેવભૂમિ દ્વારકા જિલ્લાના તમામ વેપારીઓ માટે ' . $specialFreePeriod['gu']
+        . ' સુધી બિલકુલ FREE — બાકી બધા માટે ' . $standardFreePeriod['gu'] . ' ફ્રી ટ્રાયલ!'
 );
 
 // FAQ (visible section + FAQPage schema) — editable via `landing_faqs` JSON.
@@ -140,7 +151,7 @@ if (!is_array($faqs) || $faqs === []) {
         ['q' => 'What is a Google review QR code stand?', 'a' => 'It is a printed standee with a unique QR code for your business. Customers scan it, tap a star rating, and 4–5 star customers are guided straight to your Google review page — so your Google profile grows automatically.'],
         ['q' => 'How does the AI review generator work?', 'a' => 'The system keeps a ready buffer of natural, category-aware review texts for your business. A happy customer just taps once — no typing needed — and posts the review on Google in seconds.'],
         ['q' => 'What happens when a customer gives 1–3 stars?', 'a' => 'Low ratings are captured privately as internal feedback and never pushed to Google. You see the feedback in your dashboard and can fix the issue — your public rating only goes up.'],
-        ['q' => 'Is it free for businesses in Devbhumi Dwarka?', 'a' => 'Yes! All businesses in Devbhumi Dwarka district (Dwarka, Khambhalia, Bhanvad, Okha, Salaya area) get the platform completely FREE for up to 3 years. Businesses elsewhere get a free trial of at least 3 months.'],
+        ['q' => 'Is it free for businesses in Devbhumi Dwarka?', 'a' => 'Yes! All businesses in Devbhumi Dwarka district (Dwarka, Khambhalia, Bhanvad, Okha, Salaya area) get the platform completely FREE for ' . $specialFreePeriod['en'] . '. Businesses elsewhere get a free trial of ' . $standardFreePeriod['en'] . '. After the free period it is simple wallet recharges — you only pay for the reviews you collect.'],
         ['q' => 'Do I need any technical knowledge?', 'a' => 'No. Register your business, download your print-ready QR standee, and place it on your counter. Everything else — review flow, WhatsApp reports, analytics — runs automatically.'],
         ['q' => 'How much does it cost after the free period?', 'a' => 'Simple wallet-based recharges like a mobile plan — pay only for the reviews you collect. No monthly contract, no hidden fees, cancel anytime.'],
     ];
