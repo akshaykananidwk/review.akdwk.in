@@ -43,16 +43,42 @@ TestRunner::ok(
 // ---------------------------------------------------------------------
 // 2. The secret is nowhere in the repository
 // ---------------------------------------------------------------------
-$config = TestRunner::source('app/config/config.php');
+// The connector bootstrap must NOT live in config.php: the updater
+// treats that file as a protected path and never refreshes it, so
+// anything placed there reaches fresh installs only. This cost one
+// release — the live site reported "secret missing" while the secret
+// was saved, because its config.php was the pre-connector copy.
+$akBootstrap = TestRunner::source('app/config/ak_earn.php');
+TestRunner::ok('the connector bootstrap is its own deployable file', $akBootstrap !== '');
+TestRunner::ok(
+    'config.php does not define the connector constants',
+    !str_contains(TestRunner::source('app/config/config.php'), "define('AK_SITE_KEY'"),
+    'a protected file cannot carry configuration that has to ship'
+);
+TestRunner::ok(
+    'the bootstrap is loaded from database.php, which does deploy',
+    str_contains(TestRunner::source('app/config/database.php'), "require_once __DIR__ . '/ak_earn.php'"),
+    'every entry point requires database.php'
+);
+TestRunner::ok(
+    'app/config/ak_earn.php is not a protected path',
+    !str_contains(TestRunner::source('app/services/GitHubUpdateService.php'), "'app/config/ak_earn.php'"),
+    ''
+);
 TestRunner::ok(
     'the secret is read from the environment',
-    str_contains($config, "BootstrapEnv::envString('AK_EARN_SECRET', '')"),
+    str_contains($akBootstrap, "BootstrapEnv::envString('AK_EARN_SECRET', '')"),
     ''
 );
 TestRunner::ok(
     'the secret has no literal fallback',
-    !preg_match("/AK_EARN_SECRET'\s*,\s*'[^']+'/", $config),
+    !preg_match("/AK_EARN_SECRET'\s*,\s*'[^']+'/", $akBootstrap),
     'a default value here would be a secret committed to Git'
+);
+TestRunner::ok(
+    'every define is guarded against a duplicate',
+    substr_count($akBootstrap, '!defined(') >= 3,
+    'an old config.php still carrying the inline block must not fatal'
 );
 
 // Sweep the tracked tree for anything shaped like a 64-hex secret.
@@ -268,10 +294,10 @@ TestRunner::ok(
 // .env stays the safer home and must keep winning; the panel is the
 // convenience path for an admin who cannot edit files on the server.
 // ---------------------------------------------------------------------
-$cfg = TestRunner::source('app/config/config.php');
 TestRunner::ok(
-    'config.php defines the secret only when .env supplies one',
-    str_contains($cfg, "if (\$akEarnSecretFromEnv !== '') {") && str_contains($cfg, "define('AK_SITE_SECRET', \$akEarnSecretFromEnv)"),
+    'the bootstrap defines the secret only when .env supplies one',
+    str_contains($akBootstrap, "if (\$akEarnSecretFromEnv !== '' && !defined('AK_SITE_SECRET'))")
+        && str_contains($akBootstrap, "define('AK_SITE_SECRET', \$akEarnSecretFromEnv)"),
     'defining it as an empty string would block the database fallback forever'
 );
 TestRunner::ok(

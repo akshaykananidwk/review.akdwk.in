@@ -4,6 +4,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/bootstrap_env.php';
 BootstrapEnv::load();
 
+// Loaded from here rather than from config.php, which the updater
+// protects and therefore never refreshes on a live server. Every entry
+// point requires this file, so the AK Earn constants and the error
+// handler are always in place. See app/config/ak_earn.php.
+require_once __DIR__ . '/ak_earn.php';
+
 function getPDO(): PDO
 {
     static $pdo = null;
