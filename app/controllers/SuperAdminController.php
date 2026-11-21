@@ -1415,6 +1415,18 @@ final class SuperAdminController
                     $flash = 'Plan deleted.';
                 }
             }
+
+            // A plan or a price just changed — tell AK Earn, so the
+            // master's catalogue never quotes a stale price. Best effort:
+            // the nightly job re-sends the whole list anyway.
+            try {
+                require_once __DIR__ . '/../services/AkEarnService.php';
+                if (AkEarnService::isConfigured()) {
+                    (new AkEarnService($pdo))->syncProducts();
+                }
+            } catch (Throwable) {
+                // Saving a plan must never fail because of reporting.
+            }
         }
 
         $hasValidityCol = paymentPlansHaveDurationDays($pdo);

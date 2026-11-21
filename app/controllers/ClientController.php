@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../services/AkEarnService.php';
 require_once __DIR__ . '/../helpers/settings_helper.php';
 require_once __DIR__ . '/../helpers/session_helper.php';
 require_once __DIR__ . '/../helpers/audit_helper.php';
@@ -222,6 +223,19 @@ final class ClientController
                 logLoginHistory($pdo, 'client', null, $clientId, $email);
             } catch (Throwable) {
                 // non-fatal
+            }
+
+            // AK Earn: a new business registered. Queued locally and sent
+            // by cron, so earn.akdwk.in can never delay a registration.
+            try {
+                (new AkEarnService($pdo))->queueSignup(
+                    $ownerName !== '' ? $ownerName : $businessName,
+                    $mobile,
+                    $email,
+                    ['business_name' => $businessName, 'city' => $city, 'district' => $district]
+                );
+            } catch (Throwable) {
+                // Reporting is never allowed to fail a registration.
             }
 
             $waMediaRel = $standeeRelative;

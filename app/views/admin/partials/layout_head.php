@@ -19,6 +19,7 @@ $adminMenu = [
     ['key' => 'create_reseller','label' => 'Create Reseller', 'href' => APP_URL . '/admin_create_reseller.php',      'icon' => '+'],
     ['key' => 'global',        'label' => 'Global Settings',    'href' => APP_URL . '/admin_global_settings.php',      'icon' => 'G'],
     ['key' => 'cron',          'label' => 'Cron Settings',      'href' => APP_URL . '/admin_cron_settings.php',        'icon' => '⏱'],
+    ['key' => 'ak_earn',       'label' => 'AK Earn Connection', 'href' => APP_URL . '/admin_ak_earn.php',              'icon' => '🔗'],
     ['key' => 'system_update', 'label' => 'System Update',      'href' => APP_URL . '/admin_system_update.php',        'icon' => '⟳'],
     ['key' => 'audit',         'label' => 'Audit & Logs',       'href' => APP_URL . '/admin_audit.php',                'icon' => 'A'],
 ];

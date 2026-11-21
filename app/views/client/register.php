@@ -22,7 +22,9 @@
   <p style="margin:6px 0 14px;color:#475569">Create account and get your dynamic QR instantly.</p>
   <div id="formMessage" class="msg"></div>
   <div id="qrResult" class="qr" style="display:none"></div>
-  <form id="registerForm" method="post">
+  <!-- data-ak-form: ak-connect.js adds hidden ak_ref / ak_vid fields so the
+       referral survives even if the cookie is blocked. -->
+  <form id="registerForm" method="post" data-ak-form>
     <div class="grid g2">
       <div><label>Business Name *</label><input name="business_name" required></div>
       <div><label>Owner Name</label><input name="owner_name"></div>
@@ -108,5 +110,6 @@ async function loadFacilitiesByCategory(){
 categorySelect.addEventListener('change', loadFacilitiesByCategory);
 loadFacilitiesByCategory();
 </script>
+<?php require __DIR__ . '/../partials/ak_connect_tag.php'; ?>
 </body>
 </html>

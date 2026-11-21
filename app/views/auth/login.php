@@ -30,5 +30,6 @@
   <a class="btn-link" href="<?= APP_URL ?>/register.php">Register Now</a>
   <a class="btn-link" href="<?= APP_URL ?>/forgot_password.php" style="margin-top:8px">Reset Password via WhatsApp</a>
 </div></div>
+<?php require __DIR__ . '/../partials/ak_connect_tag.php'; ?>
 </body>
 </html>

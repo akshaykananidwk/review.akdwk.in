@@ -1,0 +1,3 @@
+# Unsent AK Earn events may contain customer names and mobiles.
+# Never serve this directory, whatever the docroot is set to.
+Require all denied

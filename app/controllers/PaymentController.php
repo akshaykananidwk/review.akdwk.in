@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../services/AkEarnService.php';
 require_once __DIR__ . '/../helpers/session_helper.php';
 require_once __DIR__ . '/../helpers/csrf_helper.php';
 require_once __DIR__ . '/../helpers/settings_helper.php';
@@ -145,6 +146,21 @@ final class PaymentController
             ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         ]);
 
+        // AK Earn: order created (not yet paid). Local queue write only.
+        try {
+            (new AkEarnService($pdo))->queueOrder(
+                $orderId,
+                (float)$plan['price_inr'],
+                'recharge-' . (int)$plan['id'],
+                (string)($client['business_name'] ?? ''),
+                (string)($client['mobile'] ?? ''),
+                'created',
+                ['plan_name' => (string)$plan['name'], 'client_id' => $clientId]
+            );
+        } catch (Throwable) {
+            // Never block a payment from starting.
+        }
+
         echo json_encode([
             'ok'        => true,
             'order_id'  => $orderId,
@@ -280,6 +296,36 @@ final class PaymentController
             return;
         }
 
+        // Refunds. Razorpay sends the refund entity alongside the payment
+        // entity, so the order is already resolved above. This is the only
+        // automatic refund signal the site has — there is no in-app
+        // "refund" button today.
+        if (in_array($eventName, ['refund.created', 'refund.processed', 'payment.refunded'], true)) {
+            $refund = $event['payload']['refund']['entity'] ?? [];
+            $refundPaise = (int)($refund['amount'] ?? ($payment['amount_refunded'] ?? 0));
+            $refundInr = $refundPaise > 0 ? $refundPaise / 100 : null;
+
+            $pdo->prepare("
+                UPDATE payment_transactions
+                SET status = 'refunded', updated_at = NOW()
+                WHERE gateway_order_id = :oid AND status = 'paid'
+            ")->execute([':oid' => $orderId]);
+
+            try {
+                (new AkEarnService($pdo))->queueRefund(
+                    $orderId,
+                    'Razorpay ' . $eventName,
+                    $refundInr
+                );
+            } catch (Throwable) {
+                // Acknowledging the webhook matters more than reporting it.
+            }
+
+            http_response_code(200);
+            echo json_encode(['ok' => true, 'message' => 'Refund recorded']);
+            return;
+        }
+
         if ($eventName === 'payment.failed') {
             $upd = $pdo->prepare("
                 UPDATE payment_transactions
@@ -329,6 +375,7 @@ final class PaymentController
         $bonus = 0;
         $validUntil = '';
         $validityDays = 0;
+        $akPlanId = 0;   // captured for the AK Earn product code below
 
         // Atomic critical section: lock the row, re-check status, credit, persist.
         try {
@@ -351,6 +398,7 @@ final class PaymentController
                 $pdo->commit();
             } else {
                 $planId = (int)$row['plan_id'];
+                $akPlanId = $planId;
                 $plan = null;
                 if ($planId > 0) {
                     $hasValidity = paymentPlansHaveDurationDays($pdo);
@@ -439,6 +487,16 @@ final class PaymentController
         // Best-effort WhatsApp invoice (only on the FRESH credit, not duplicates).
         $this->sendInvoiceWhatsApp($pdo, $clientId, $paymentId, $amountInr, $credits, $bonus, $newBalance, $validUntil, $validityDays);
 
+        // AK Earn: the money actually arrived. Both the browser callback
+        // and the Razorpay webhook funnel through here, and this branch
+        // runs only on the fresh credit — so the event fires exactly once
+        // however the payment was confirmed.
+        try {
+            $this->trackAkEarnPayment($pdo, $clientId, $orderId, $amountInr, $akPlanId, $paymentId);
+        } catch (Throwable) {
+            // Reporting must never affect a successful payment response.
+        }
+
         $msg = sprintf('Payment successful! %d credits added to your wallet.', $creditedTotal);
         if ($validUntil !== '') {
             $msg .= ' Valid until ' . $validUntil . '.';
@@ -451,6 +509,53 @@ final class PaymentController
             'credited'       => $creditedTotal,
             'valid_until'    => $validUntil,
         ];
+    }
+
+    /**
+     * Send a paid wallet recharge to AK Earn as either a first purchase
+     * or a renewal.
+     *
+     * "Renewal" means the client has paid us before: any earlier `paid`
+     * transaction makes this one a repeat. That is the distinction the
+     * master cares about, and it is read from our own ledger rather than
+     * guessed from the plan.
+     */
+    private function trackAkEarnPayment(
+        PDO $pdo,
+        int $clientId,
+        string $orderId,
+        int $amountInr,
+        int $planId,
+        string $paymentId
+    ): void {
+        if (!AkEarnService::isConfigured()) {
+            return;
+        }
+
+        $c = $pdo->prepare('SELECT business_name, owner_name, mobile FROM clients WHERE id = :id LIMIT 1');
+        $c->execute([':id' => $clientId]);
+        $client = $c->fetch() ?: [];
+        $name = trim((string)($client['owner_name'] ?? '')) !== ''
+            ? (string)$client['owner_name']
+            : (string)($client['business_name'] ?? '');
+        $mobile = (string)($client['mobile'] ?? '');
+
+        $prior = $pdo->prepare("
+            SELECT COUNT(*) FROM payment_transactions
+            WHERE client_id = :cid AND status = 'paid' AND gateway_order_id <> :oid
+        ");
+        $prior->execute([':cid' => $clientId, ':oid' => $orderId]);
+        $isRenewal = (int)$prior->fetchColumn() > 0;
+
+        $productCode = $planId > 0 ? 'recharge-' . $planId : null;
+        $meta = ['client_id' => $clientId, 'payment_id' => $paymentId, 'gateway' => 'razorpay'];
+
+        $svc = new AkEarnService($pdo);
+        if ($isRenewal) {
+            $svc->queueRenewal($orderId, (float)$amountInr, $productCode, $name, $mobile, $meta);
+        } else {
+            $svc->queueOrder($orderId, (float)$amountInr, $productCode, $name, $mobile, 'paid', $meta);
+        }
     }
 
     private function getWalletBalance(PDO $pdo, int $clientId): int

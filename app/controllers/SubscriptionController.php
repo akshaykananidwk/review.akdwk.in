@@ -8,6 +8,7 @@ require_once __DIR__ . '/../helpers/csrf_helper.php';
 require_once __DIR__ . '/../helpers/settings_helper.php';
 require_once __DIR__ . '/../helpers/subscription_helper.php';
 require_once __DIR__ . '/../services/RazorpayService.php';
+require_once __DIR__ . '/../services/AkEarnService.php';
 
 final class SubscriptionController
 {
@@ -108,6 +109,21 @@ final class SubscriptionController
             ':amt' => (int)$plan['price_inr'],
             ':notes' => json_encode(['plan' => $plan, 'order' => $resp['order']], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         ]);
+
+        // AK Earn: subscription order created (not yet paid).
+        try {
+            (new AkEarnService($pdo))->queueOrder(
+                $orderId,
+                (float)$plan['price_inr'],
+                'plan-' . (int)$plan['id'],
+                (string)($client['business_name'] ?? ''),
+                (string)($client['mobile'] ?? ''),
+                'created',
+                ['plan_name' => (string)$plan['name'], 'client_id' => $clientId, 'kind' => 'subscription']
+            );
+        } catch (Throwable) {
+            // Never block a payment from starting.
+        }
 
         echo json_encode([
             'ok' => true,
@@ -248,6 +264,16 @@ final class SubscriptionController
             ]);
 
             $pdo->commit();
+
+            // AK Earn: a subscription payment landed. Reached only on the
+            // fresh transition to paid — the already-paid branch returned
+            // earlier — so browser callback and webhook cannot double up.
+            try {
+                $this->trackAkEarnSubscription($pdo, $clientId, $orderId, (int)$row['amount_inr'], $planId, $paymentId);
+            } catch (Throwable) {
+                // Reporting must never affect a successful payment.
+            }
+
             return [
                 'ok' => true,
                 'message' => 'Subscription renewed successfully.',
@@ -258,6 +284,47 @@ final class SubscriptionController
                 $pdo->rollBack();
             }
             return ['ok' => false, 'message' => 'Internal error: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * A platform subscription payment. The first one a client makes is
+     * the purchase; every later one is a renewal, which is what the
+     * master reports on separately.
+     */
+    private function trackAkEarnSubscription(
+        PDO $pdo,
+        int $clientId,
+        string $orderId,
+        int $amountInr,
+        int $planId,
+        string $paymentId
+    ): void {
+        if (!AkEarnService::isConfigured()) {
+            return;
+        }
+
+        $c = $pdo->prepare('SELECT business_name, owner_name, mobile FROM clients WHERE id = :id LIMIT 1');
+        $c->execute([':id' => $clientId]);
+        $client = $c->fetch() ?: [];
+        $name = trim((string)($client['owner_name'] ?? '')) !== ''
+            ? (string)$client['owner_name']
+            : (string)($client['business_name'] ?? '');
+        $mobile = (string)($client['mobile'] ?? '');
+
+        $prior = $pdo->prepare("
+            SELECT COUNT(*) FROM subscription_orders
+            WHERE client_id = :cid AND status = 'paid' AND gateway_order_id <> :oid
+        ");
+        $prior->execute([':cid' => $clientId, ':oid' => $orderId]);
+        $isRenewal = (int)$prior->fetchColumn() > 0;
+
+        $svc = new AkEarnService($pdo);
+        $meta = ['client_id' => $clientId, 'payment_id' => $paymentId, 'kind' => 'subscription'];
+        if ($isRenewal) {
+            $svc->queueRenewal($orderId, (float)$amountInr, 'plan-' . $planId, $name, $mobile, $meta);
+        } else {
+            $svc->queueOrder($orderId, (float)$amountInr, 'plan-' . $planId, $name, $mobile, 'paid', $meta);
         }
     }
 }

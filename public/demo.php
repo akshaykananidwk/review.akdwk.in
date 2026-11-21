@@ -159,5 +159,6 @@ function escapeHtml(s){
 }
 </script>
 
+<?php require __DIR__ . '/../app/views/partials/ak_connect_tag.php'; ?>
 </body>
 </html>

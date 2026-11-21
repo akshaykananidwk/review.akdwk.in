@@ -6,6 +6,12 @@ require_once __DIR__ . '/../app/helpers/settings_helper.php';
 
 $pdo = getPDO();
 
+// AK Earn: count this landing-page view for the daily totals push. One
+// tiny upsert, wrapped so a missing table or a busy database can never
+// cost us the page.
+require_once __DIR__ . '/../app/services/AkEarnService.php';
+AkEarnService::countVisit($pdo);
+
 // ---------------------------------------------------------------------------
 // CMS values (with safe fallbacks).
 // ---------------------------------------------------------------------------
@@ -679,5 +685,6 @@ $jsonLd = [
   els.forEach(function(el){ observer.observe(el); });
 })();
 </script>
+<?php require __DIR__ . '/../app/views/partials/ak_connect_tag.php'; ?>
 </body>
 </html>

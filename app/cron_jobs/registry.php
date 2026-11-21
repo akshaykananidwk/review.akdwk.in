@@ -69,6 +69,22 @@ return [
         'schedule_value' => '0 03:00',
         'enabled_by_default' => true,
     ],
+    'ak_earn_outbox' => [
+        'class' => 'AkEarnOutboxJob',
+        'name' => 'AK Earn — Send Queued Events',
+        'description' => 'Delivers signups, orders, payments, renewals and refunds to the AK Earn master. Customer requests only write to the local queue, so the master being slow or down never delays a signup or a payment.',
+        'schedule_type' => 'every_minutes',
+        'schedule_value' => '1',
+        'enabled_by_default' => true,
+    ],
+    'ak_earn_daily' => [
+        'class' => 'AkEarnDailyJob',
+        'name' => 'AK Earn — Daily Totals & Product Sync',
+        'description' => 'Sends yesterday\'s visitors, signups, orders and revenue to the master, re-sends the plan and price list, and uploads 12 months of history on first run.',
+        'schedule_type' => 'daily',
+        'schedule_value' => '02:20',
+        'enabled_by_default' => true,
+    ],
     'cleanup' => [
         'class' => 'CleanupJob',
         'name' => 'Housekeeping & Log Cleanup',

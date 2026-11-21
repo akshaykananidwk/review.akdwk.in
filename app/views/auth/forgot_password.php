@@ -75,5 +75,6 @@
     <?php endif; ?>
   </div>
 </div>
+<?php require __DIR__ . '/../partials/ak_connect_tag.php'; ?>
 </body>
 </html>
