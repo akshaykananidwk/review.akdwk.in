@@ -348,3 +348,27 @@ TestRunner::ok(
     str_contains($adminView, 'plain') && str_contains($adminView, '.env'),
     'the admin should know the safer option exists'
 );
+
+// ---------------------------------------------------------------------
+// 9. The master's catalogue must match what the site actually sells
+//
+// The first sync listed six products for a site whose Recharge Plans
+// page has four: the two extra were legacy subscription_plans rows,
+// which have no entry in the client menu at all.
+// ---------------------------------------------------------------------
+TestRunner::ok(
+    'recharge plans are always offered',
+    str_contains($service, "'code' => 'recharge-' . (int)\$p['id']"),
+    ''
+);
+TestRunner::ok(
+    'subscription plans are only active if one has actually been bought',
+    str_contains($service, "SELECT COUNT(*) FROM subscription_orders WHERE status = 'paid'")
+        && str_contains($service, "'status' => \$live ? 'active' : 'inactive'"),
+    'otherwise the master lists products no customer can reach'
+);
+TestRunner::ok(
+    'stale plans are retired rather than dropped from the sync',
+    str_contains($service, "FROM subscription_plans"),
+    'dropping them would leave them marked Active on the master forever'
+);

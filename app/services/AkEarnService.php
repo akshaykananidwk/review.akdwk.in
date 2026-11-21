@@ -477,11 +477,25 @@ final class AkEarnService
             ], static fn($v): bool => $v !== null && $v !== '');
         }
 
-        // subscription_plans is optional — older installs may not have it.
+        // subscription_plans is the older platform-subscription flow. It
+        // has no entry in the client menu — recharge plans carry validity
+        // days and do the same job — so by default these are NOT things a
+        // customer can buy, and listing them would leave the master's
+        // catalogue showing products the site does not actually sell.
+        //
+        // They are still sent, but marked inactive unless someone has
+        // genuinely paid for one. That retires the stale rows on the
+        // master instead of abandoning them as "Active" forever, and it
+        // corrects itself the moment the flow is used in earnest.
+        $subscriptionsInUse = (int)($this->scalar(
+            "SELECT COUNT(*) FROM subscription_orders WHERE status = 'paid'"
+        ) ?? 0) > 0;
+
         foreach ($this->fetchAll("
             SELECT id, name, price_inr, duration_days, is_active
             FROM subscription_plans ORDER BY id ASC
         ") as $p) {
+            $live = $subscriptionsInUse && (int)$p['is_active'] === 1;
             $products[] = array_filter([
                 'code' => 'plan-' . (int)$p['id'],
                 'name' => (string)$p['name'],
@@ -489,7 +503,7 @@ final class AkEarnService
                 'renewal_price' => (float)$p['price_inr'],
                 'billing' => $this->billingLabel((int)($p['duration_days'] ?? 0)),
                 'url' => APP_URL . '/client_subscription_renew.php',
-                'status' => (int)$p['is_active'] === 1 ? 'active' : 'inactive',
+                'status' => $live ? 'active' : 'inactive',
             ], static fn($v): bool => $v !== null && $v !== '');
         }
 
