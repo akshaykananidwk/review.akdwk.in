@@ -300,7 +300,7 @@ final class SubscriptionController
         int $planId,
         string $paymentId
     ): void {
-        if (!AkEarnService::isConfigured()) {
+        if (!AkEarnService::ready($pdo)) {
             return;
         }
 

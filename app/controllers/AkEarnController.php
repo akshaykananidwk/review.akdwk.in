@@ -35,6 +35,34 @@ final class AkEarnController
                 $action = (string)($_POST['action'] ?? '');
                 try {
                     switch ($action) {
+                        case 'save_secret':
+                            // Write-only: the value is never rendered back
+                            // to the page, the same rule the GitHub token
+                            // on the System Update page follows.
+                            // Trim first: a trailing space copied out of the
+                            // master's admin page is the usual reason a
+                            // secret "does not work".
+                            $secret = trim((string)($_POST['ak_secret'] ?? ''));
+                            if ($secret === '') {
+                                $flashError = 'Paste the secret first.';
+                                break;
+                            }
+                            if (!preg_match('/^[A-Za-z0-9_\-]{16,128}$/', $secret)) {
+                                $flashError = 'That does not look like a secret — it should be one long run of letters and numbers, with no spaces or quotes. Copy it again from AK Earn.';
+                                break;
+                            }
+                            upsertSystemSetting($pdo, 'ak_earn_secret', $secret, 'string', $adminId);
+                            // Log that it changed, never the value itself.
+                            logAdminActivity($pdo, $adminId, 'AK_EARN_SAVE_SECRET', 'system_settings', null, 'Saved AK Earn secret');
+                            $flash = 'Secret saved. Now press Test Connection.';
+                            break;
+
+                        case 'clear_secret':
+                            $pdo->prepare("DELETE FROM system_settings WHERE setting_key = 'ak_earn_secret'")->execute();
+                            logAdminActivity($pdo, $adminId, 'AK_EARN_CLEAR_SECRET', 'system_settings', null, 'Removed AK Earn secret');
+                            $flash = 'Secret removed. The site stops sending until a new one is saved.';
+                            break;
+
                         case 'ping':
                             $pingResult = $service->ping();
                             $flash = ($pingResult['status'] ?? '') === 'ok'
@@ -109,7 +137,8 @@ final class AkEarnController
             }
         }
 
-        $configured = AkEarnService::isConfigured();
+        $configured = AkEarnService::ready($pdo);
+        $secretSource = AkEarnService::secretSource($pdo);
         $counts = $service->counts();
         $recent = $service->recentEvents(40);
         $failed = $service->failedEvents(50);

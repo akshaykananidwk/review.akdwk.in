@@ -42,9 +42,8 @@ $statusPill = static function (string $s): string {
         Master: <span class="ak-mono"><?= htmlspecialchars($masterUrl) ?></span> &middot;
         Site key: <span class="ak-mono"><?= htmlspecialchars($siteKey) ?></span>
       <?php else: ?>
-        The secret is missing. Add <span class="ak-mono">AK_EARN_SECRET=...</span> to the
-        <span class="ak-mono">.env</span> file in the site root, then press Test Connection.
-        Until then nothing is sent and the site works exactly as before.
+        Paste the secret in the box below and press Save. Until then nothing is
+        sent and the site works exactly as before.
       <?php endif; ?>
     </div>
   </div>
@@ -53,6 +52,52 @@ $statusPill = static function (string $s): string {
     <input type="hidden" name="action" value="ping">
     <button class="btn" type="submit">Test Connection</button>
   </form>
+</div>
+
+<div class="card">
+  <h3>Secret</h3>
+  <?php if ($secretSource === 'env'): ?>
+    <p style="color:#166534;margin:0 0 6px">
+      ✅ The secret is coming from the <span class="ak-mono">.env</span> file on the server.
+      That is the safest place, so this box is disabled — <span class="ak-mono">.env</span> always wins.
+      To switch to the box instead, remove the <span class="ak-mono">AK_EARN_SECRET</span> line from
+      <span class="ak-mono">.env</span>.
+    </p>
+  <?php else: ?>
+    <p style="color:#475569;margin:0 0 10px;font-size:.92rem">
+      Copy the secret from AK Earn (<em>Site key</em> → <em>Secret</em>) and paste it here.
+      It is stored write-only: once saved it is never shown again, and it never reaches the browser
+      or any page of the public site.
+    </p>
+    <form method="post" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:0">
+      <?= csrfField() ?>
+      <input type="hidden" name="action" value="save_secret">
+      <div style="flex:1 1 320px">
+        <label for="ak_secret">Secret</label>
+        <input type="password" id="ak_secret" name="ak_secret" autocomplete="off" spellcheck="false"
+               placeholder="<?= $secretSource === 'database' ? 'A secret is saved — type a new one to replace it' : 'Paste the secret here' ?>">
+      </div>
+      <button class="btn" type="submit">Save Secret</button>
+    </form>
+    <?php if ($secretSource === 'database'): ?>
+      <form method="post" style="margin:10px 0 0"
+            onsubmit="return confirm('Remove the saved secret? The site stops sending to AK Earn until a new one is saved. Nothing already queued is lost.');">
+        <?= csrfField() ?>
+        <input type="hidden" name="action" value="clear_secret">
+        <button class="btn btn-ghost" type="submit">Remove saved secret</button>
+      </form>
+      <p style="color:#92400e;font-size:.84rem;margin:10px 0 0">
+        Saved in the database. That is convenient, but a secret in the database is stored as plain
+        text — anyone who can read the database can read it. Putting
+        <span class="ak-mono">AK_EARN_SECRET=...</span> in <span class="ak-mono">.env</span> instead is safer,
+        and it takes priority over this box automatically.
+      </p>
+    <?php endif; ?>
+  <?php endif; ?>
+  <p style="color:#475569;font-size:.84rem;margin:10px 0 0">
+    The site key <span class="ak-mono"><?= htmlspecialchars($siteKey) ?></span> is already set and needs no action.
+    It is public by design — only the secret has to stay private.
+  </p>
 </div>
 
 <?php if ($pingResult !== null): ?>

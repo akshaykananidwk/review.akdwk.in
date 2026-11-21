@@ -1421,7 +1421,7 @@ final class SuperAdminController
             // the nightly job re-sends the whole list anyway.
             try {
                 require_once __DIR__ . '/../services/AkEarnService.php';
-                if (AkEarnService::isConfigured()) {
+                if (AkEarnService::ready($pdo)) {
                     (new AkEarnService($pdo))->syncProducts();
                 }
             } catch (Throwable) {

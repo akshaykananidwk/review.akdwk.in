@@ -40,9 +40,13 @@ final class AkEarnService
 
     private PDO $pdo;
 
+    /** 'env' | 'database' | 'none', decided once per request by boot(). */
+    private static ?string $secretSource = null;
+
     public function __construct(PDO $pdo)
     {
         $this->pdo = $pdo;
+        self::boot($pdo);
 
         // storage/ is a protected path, so a deploy never creates this
         // directory. Without it the SDK's own retry queue silently
@@ -56,6 +60,58 @@ final class AkEarnService
     // ------------------------------------------------------------------
     // Availability
     // ------------------------------------------------------------------
+
+    /**
+     * Resolve the secret once per request.
+     *
+     * config.php defines AK_SITE_SECRET only when .env supplies one, so
+     * .env always wins. Otherwise the value saved from Admin → AK Earn
+     * Connection is used, which lets the site be connected without
+     * touching a file on the server.
+     *
+     * Must run before anything calls the SDK. The constructor does it,
+     * and the static entry points below do it too, so there is no order
+     * in which a caller can get a half-configured connector.
+     */
+    public static function boot(PDO $pdo): void
+    {
+        if (self::$secretSource !== null) {
+            return;
+        }
+        // config.php defines the constant only when .env supplied a
+        // value, so finding it already defined means .env is the source.
+        if (defined('AK_SITE_SECRET')) {
+            self::$secretSource = AK_SITE_SECRET !== '' ? 'env' : 'none';
+            return;
+        }
+        $fromDb = '';
+        try {
+            $fromDb = trim((string)getSystemSetting($pdo, 'ak_earn_secret', ''));
+        } catch (Throwable) {
+            // Table missing or database down: stay unconfigured rather
+            // than guess. Nothing is sent, nothing breaks.
+        }
+        define('AK_SITE_SECRET', $fromDb);
+        self::$secretSource = $fromDb !== '' ? 'database' : 'none';
+    }
+
+    /** boot() + isConfigured() in one, for callers that hold a PDO. */
+    public static function ready(PDO $pdo): bool
+    {
+        self::boot($pdo);
+        return self::isConfigured();
+    }
+
+    /**
+     * Where the active secret came from: 'env', 'database' or 'none'.
+     * Recorded by boot() rather than re-derived, because inferring it
+     * afterwards from the constant alone cannot tell the two apart.
+     */
+    public static function secretSource(PDO $pdo): string
+    {
+        self::boot($pdo);
+        return self::$secretSource ?? 'none';
+    }
 
     /**
      * True when the site key, the secret and the master's SDK are all

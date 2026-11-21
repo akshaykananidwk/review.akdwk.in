@@ -261,3 +261,64 @@ TestRunner::ok(
     !str_contains($adminView, 'AK_SITE_SECRET'),
     ''
 );
+
+// ---------------------------------------------------------------------
+// 8. The secret can be entered from the admin panel instead of .env
+//
+// .env stays the safer home and must keep winning; the panel is the
+// convenience path for an admin who cannot edit files on the server.
+// ---------------------------------------------------------------------
+$cfg = TestRunner::source('app/config/config.php');
+TestRunner::ok(
+    'config.php defines the secret only when .env supplies one',
+    str_contains($cfg, "if (\$akEarnSecretFromEnv !== '') {") && str_contains($cfg, "define('AK_SITE_SECRET', \$akEarnSecretFromEnv)"),
+    'defining it as an empty string would block the database fallback forever'
+);
+TestRunner::ok(
+    'boot() treats an already-defined constant as the .env value',
+    str_contains($service, "if (defined('AK_SITE_SECRET')) {") && str_contains($service, "self::\$secretSource = AK_SITE_SECRET !== '' ? 'env' : 'none';"),
+    '.env must take priority over the panel'
+);
+TestRunner::ok(
+    'the source is recorded, not guessed afterwards',
+    str_contains($service, 'private static ?string $secretSource = null;'),
+    'inferring it from the constant cannot tell env and database apart'
+);
+$bootBody = TestRunner::between($service, 'public static function boot(PDO $pdo): void', 'public static function ready');
+TestRunner::ok('boot() was located for inspection', $bootBody !== '');
+TestRunner::ok(
+    'a database or table failure leaves the connector off, not half-on',
+    str_contains($bootBody, "getSystemSetting(\$pdo, 'ak_earn_secret', '')")
+        && str_contains($bootBody, 'catch (Throwable)'),
+    'an unreadable settings table must mean "not configured", never a half-set secret'
+);
+
+$ctrl = TestRunner::source('app/controllers/AkEarnController.php');
+TestRunner::ok('the panel can save a secret', str_contains($ctrl, "case 'save_secret':"));
+TestRunner::ok('the panel can remove a secret', str_contains($ctrl, "case 'clear_secret':"));
+TestRunner::ok(
+    'a pasted secret is trimmed before use',
+    str_contains($ctrl, "trim((string)(\$_POST['ak_secret'] ?? ''))"),
+    'a trailing space from a copy-paste is the usual cause of a secret that "does not work"'
+);
+TestRunner::ok(
+    'the pasted value is validated before it is stored',
+    str_contains($ctrl, "preg_match('/^[A-Za-z0-9_\\-]{16,128}\$/', \$secret)"),
+    ''
+);
+TestRunner::ok(
+    'saving the secret never writes it to the audit log',
+    str_contains($ctrl, "'Saved AK Earn secret'") && !preg_match("/logAdminActivity\([^)]*\\\$secret/", $ctrl),
+    'the audit trail records that it changed, never the value'
+);
+TestRunner::ok(
+    'the secret input is write-only',
+    str_contains($adminView, 'type="password" id="ak_secret"')
+        && !preg_match('/name="ak_secret"[^>]*value="/', $adminView),
+    'rendering the stored value back into the page would leak it to anyone with admin screen access'
+);
+TestRunner::ok(
+    'the panel says plainly that a database secret is plain text',
+    str_contains($adminView, 'plain') && str_contains($adminView, '.env'),
+    'the admin should know the safer option exists'
+);

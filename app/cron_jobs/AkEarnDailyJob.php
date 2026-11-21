@@ -19,8 +19,8 @@ final class AkEarnDailyJob
 {
     public function run(PDO $pdo, CronLogger $log): string
     {
-        if (!AkEarnService::isConfigured()) {
-            return 'skipped: AK_EARN_SECRET not set in .env';
+        if (!AkEarnService::ready($pdo)) {
+            return 'skipped: connector not configured (no secret in .env or admin panel)';
         }
 
         $svc = new AkEarnService($pdo);

@@ -24,7 +24,17 @@ date_default_timezone_set('Asia/Kolkata');
 // ---------------------------------------------------------------------
 define('AK_MASTER_URL', BootstrapEnv::envString('AK_MASTER_URL', 'https://earn.akdwk.in'));
 define('AK_SITE_KEY', BootstrapEnv::envString('AK_SITE_KEY', 'sk_c60c1e42649ca82fb679c9bb'));
-define('AK_SITE_SECRET', BootstrapEnv::envString('AK_EARN_SECRET', ''));
+
+// The secret is defined ONLY when .env supplies it. Left undefined,
+// AkEarnService::boot() falls back to the value saved from Admin → AK
+// Earn Connection. .env therefore always wins, and stays the safer
+// place: a value in the database sits in plain text, and anyone who can
+// read the database can read it.
+$akEarnSecretFromEnv = BootstrapEnv::envString('AK_EARN_SECRET', '');
+if ($akEarnSecretFromEnv !== '') {
+    define('AK_SITE_SECRET', $akEarnSecretFromEnv);
+}
+unset($akEarnSecretFromEnv);
 // Queue file lives with our own storage, not in /tmp, so a server reboot
 // or tmp cleanup cannot drop unsent money events.
 define('AK_QUEUE_DIR', dirname(__DIR__, 2) . '/storage/ak');
