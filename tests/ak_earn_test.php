@@ -34,10 +34,21 @@ TestRunner::ok(
     ''
 );
 TestRunner::ok(
-    'our code never builds its own signature or endpoint path',
+    'our code never signs a request itself',
     !str_contains(TestRunner::source('app/services/AkEarnService.php'), 'hash_hmac')
-        && !str_contains(TestRunner::source('app/services/AkEarnService.php'), '/api/v1/'),
-    'inventing the API format was explicitly ruled out'
+        && !str_contains(TestRunner::source('app/services/AkEarnService.php'), 'curl_'),
+    'signing and transport belong to the SDK'
+);
+// One endpoint path is named directly, and only one: the product sync
+// needs full_sync, which the kit's ak_sync_products() helper cannot
+// send. It still goes through ak_request(), the SDK's own signed
+// transport. Any second path appearing here means the format is being
+// rebuilt by hand, which was ruled out.
+preg_match_all("#'(/api/v1/[a-z/]+)'#", TestRunner::source('app/services/AkEarnService.php'), $paths);
+TestRunner::same(
+    'exactly one endpoint path is named outside the SDK',
+    ['/api/v1/products'],
+    array_values(array_unique($paths[1] ?? []))
 );
 
 // ---------------------------------------------------------------------
@@ -362,13 +373,24 @@ TestRunner::ok(
     ''
 );
 TestRunner::ok(
-    'subscription plans are only active if one has actually been bought',
+    'subscription plans are only sent once one has actually been bought',
     str_contains($service, "SELECT COUNT(*) FROM subscription_orders WHERE status = 'paid'")
-        && str_contains($service, "'status' => \$live ? 'active' : 'inactive'"),
+        && str_contains($service, 'if ($subscriptionsInUse) {'),
     'otherwise the master lists products no customer can reach'
 );
 TestRunner::ok(
-    'stale plans are retired rather than dropped from the sync',
-    str_contains($service, "FROM subscription_plans"),
-    'dropping them would leave them marked Active on the master forever'
+    'the sync is a full sync, so a removed plan is retired on the master',
+    str_contains($service, "'full_sync' => true"),
+    "per-product status 'inactive' does not retire a product — only full_sync does"
+);
+TestRunner::ok(
+    'an empty catalogue is never sent',
+    str_contains($service, 'refusing to sync an empty catalogue'),
+    'with full_sync an empty list would disable every product on the master'
+);
+TestRunner::ok(
+    'full sync falls back to the kit helper if the master rejects it',
+    str_contains($service, 'ak_sync_products($products)')
+        && str_contains($service, "if ((\$result['status'] ?? '') !== 'ok')"),
+    ''
 );

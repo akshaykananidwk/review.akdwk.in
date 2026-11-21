@@ -479,38 +479,51 @@ final class AkEarnService
 
         // subscription_plans is the older platform-subscription flow. It
         // has no entry in the client menu — recharge plans carry validity
-        // days and do the same job — so by default these are NOT things a
-        // customer can buy, and listing them would leave the master's
-        // catalogue showing products the site does not actually sell.
-        //
-        // They are still sent, but marked inactive unless someone has
-        // genuinely paid for one. That retires the stale rows on the
-        // master instead of abandoning them as "Active" forever, and it
-        // corrects itself the moment the flow is used in earnest.
+        // days and do the same job — so these are only real products once
+        // somebody has actually paid for one. Otherwise they are left out
+        // entirely and the full sync below retires them on the master.
         $subscriptionsInUse = (int)($this->scalar(
             "SELECT COUNT(*) FROM subscription_orders WHERE status = 'paid'"
         ) ?? 0) > 0;
 
-        foreach ($this->fetchAll("
-            SELECT id, name, price_inr, duration_days, is_active
-            FROM subscription_plans ORDER BY id ASC
-        ") as $p) {
-            $live = $subscriptionsInUse && (int)$p['is_active'] === 1;
-            $products[] = array_filter([
-                'code' => 'plan-' . (int)$p['id'],
-                'name' => (string)$p['name'],
-                'price' => (float)$p['price_inr'],
-                'renewal_price' => (float)$p['price_inr'],
-                'billing' => $this->billingLabel((int)($p['duration_days'] ?? 0)),
-                'url' => APP_URL . '/client_subscription_renew.php',
-                'status' => $live ? 'active' : 'inactive',
-            ], static fn($v): bool => $v !== null && $v !== '');
+        if ($subscriptionsInUse) {
+            foreach ($this->fetchAll("
+                SELECT id, name, price_inr, duration_days, is_active
+                FROM subscription_plans WHERE is_active = 1 ORDER BY id ASC
+            ") as $p) {
+                $products[] = array_filter([
+                    'code' => 'plan-' . (int)$p['id'],
+                    'name' => (string)$p['name'],
+                    'price' => (float)$p['price_inr'],
+                    'renewal_price' => (float)$p['price_inr'],
+                    'billing' => $this->billingLabel((int)($p['duration_days'] ?? 0)),
+                    'url' => APP_URL . '/client_subscription_renew.php',
+                    'status' => 'active',
+                ], static fn($v): bool => $v !== null && $v !== '');
+            }
         }
 
+        // Critical guard for the full sync below: an empty list would
+        // retire the entire catalogue. fetchAll() returns [] when a query
+        // throws, so a database hiccup must never reach the master.
         if ($products === []) {
-            return ['status' => 'error', 'message' => 'No plans to send'];
+            return ['status' => 'error', 'message' => 'No plans to send — refusing to sync an empty catalogue'];
         }
-        return ak_sync_products($products);
+
+        // Full sync: the master disables any product of ours that is not
+        // in this list, so a plan deleted here stops being sellable
+        // there. Without it a retired plan stays "Active" on the master
+        // forever — per-product status: inactive does NOT retire it,
+        // which is how two dead subscription plans sat in the catalogue.
+        //
+        // ak_request() is the SDK's own signed transport and full_sync is
+        // the master's own flag (it echoes it back). If a future master
+        // drops it, fall back to the kit's plain helper rather than fail.
+        $result = ak_request('/api/v1/products', ['products' => $products, 'full_sync' => true], false);
+        if (($result['status'] ?? '') !== 'ok') {
+            $result = ak_sync_products($products);
+        }
+        return $result;
     }
 
     private function billingLabel(int $days): string
